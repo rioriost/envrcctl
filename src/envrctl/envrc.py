@@ -117,3 +117,10 @@ def is_world_writable(path: Path) -> bool:
         return False
     mode = path.stat().st_mode
     return bool(mode & 0o002)
+
+
+def is_group_writable(path: Path) -> bool:
+    if not path.exists():
+        return False
+    mode = path.stat().st_mode
+    return bool(mode & 0o020)

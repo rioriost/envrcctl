@@ -370,7 +370,7 @@
         {
           "id": "p5-11",
           "title": "Doctor enhancements for risky patterns",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Doctor checks"],
           "outputs": [
             "Warnings for unmanaged secrets outside block",

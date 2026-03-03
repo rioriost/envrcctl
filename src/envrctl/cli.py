@@ -13,6 +13,7 @@ from .envrc import (
     ENVRC_FILENAME,
     ensure_managed_block,
     extract_unmanaged_exports,
+    is_group_writable,
     is_world_writable,
     load_envrc,
     write_envrc,
@@ -32,6 +33,9 @@ secret_app = typer.Typer(help="Manage secret references.")
 app.add_typer(secret_app, name="secret")
 
 ENV_VAR_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+RISKY_EXPORT_RE = re.compile(
+    r"(SECRET|TOKEN|PASSWORD|API_KEY|ACCESS_KEY|PRIVATE_KEY)", re.IGNORECASE
+)
 
 
 def _envrc_path() -> Path:
@@ -310,16 +314,38 @@ def doctor() -> None:
         path = _envrc_path()
         if not path.exists():
             raise EnvrcctlError(".envrc not found.")
+        if path.is_symlink():
+            typer.echo(
+                "WARN: .envrc is a symlink. Writes are blocked; use a regular file.",
+                err=True,
+            )
+            warnings += 1
+        if is_group_writable(path):
+            typer.echo(
+                "WARN: .envrc is group-writable. Consider chmod g-w .envrc.",
+                err=True,
+            )
+            warnings += 1
         if is_world_writable(path):
-            typer.echo("WARN: .envrc is world-writable.", err=True)
+            typer.echo(
+                "WARN: .envrc is world-writable. Fix permissions (chmod o-w .envrc).",
+                err=True,
+            )
             warnings += 1
 
         doc = load_envrc(path)
+        block = ensure_managed_block(doc)
         if not doc.has_block:
-            typer.echo("WARN: Managed block not found in .envrc.", err=True)
+            typer.echo(
+                "WARN: Managed block not found in .envrc. Run `envrcctl init`.",
+                err=True,
+            )
             warnings += 1
         elif doc.managed and not doc.managed.include_inject:
-            typer.echo("WARN: inject line missing in managed block.", err=True)
+            typer.echo(
+                "WARN: inject line missing in managed block. Run `envrcctl init` to add it.",
+                err=True,
+            )
             warnings += 1
 
         before_clean, before_exports, before_secrets = extract_unmanaged_exports(
@@ -330,11 +356,31 @@ def doctor() -> None:
         unmanaged_secrets = {**before_secrets, **after_secrets}
         if unmanaged:
             keys = ", ".join(sorted(unmanaged.keys()))
-            typer.echo(f"WARN: unmanaged exports outside block: {keys}", err=True)
+            typer.echo(
+                f"WARN: unmanaged exports outside block: {keys}. Run `envrcctl migrate` to move them.",
+                err=True,
+            )
             warnings += 1
         if unmanaged_secrets:
             keys = ", ".join(sorted(unmanaged_secrets.keys()))
-            typer.echo(f"WARN: unmanaged secret refs outside block: {keys}", err=True)
+            typer.echo(
+                f"WARN: unmanaged secret refs outside block: {keys}. Run `envrcctl migrate` to move them.",
+                err=True,
+            )
+            warnings += 1
+
+        risky_exports = {
+            key
+            for key in {**block.exports, **unmanaged}
+            if RISKY_EXPORT_RE.search(key) and key not in block.secret_refs
+        }
+        if risky_exports:
+            keys = ", ".join(sorted(risky_exports))
+            typer.echo(
+                "WARN: possible plaintext secrets in exports: "
+                f"{keys}. Consider `envrcctl secret set` for these values.",
+                err=True,
+            )
             warnings += 1
 
         if warnings == 0:

@@ -194,6 +194,20 @@ def test_cli_doctor_warns_for_unmanaged_and_missing_inject(
     assert "unmanaged exports outside block" in result.stderr
 
 
+def test_cli_doctor_warns_for_plaintext_secrets(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    block = ManagedBlock(exports={"API_TOKEN": "plaintext"}, include_inject=True)
+    (tmp_path / ENVRC_FILENAME).write_text(
+        render_managed_block(block), encoding="utf-8"
+    )
+
+    result = runner.invoke(cli.app, ["doctor"])
+    assert result.exit_code == 0
+    assert "possible plaintext secrets" in result.stderr
+
+
 def test_cli_migrate_moves_unmanaged_exports(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()

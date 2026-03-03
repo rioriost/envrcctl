@@ -8,6 +8,7 @@ from envrctl.envrc import (
     EnvrcDocument,
     ensure_managed_block,
     extract_unmanaged_exports,
+    is_group_writable,
     is_world_writable,
     load_envrc,
     render_envrc,
@@ -76,6 +77,20 @@ def test_render_envrc_preserves_after_when_block_present(tmp_path: Path) -> None
 
 def test_is_world_writable_missing_file(tmp_path: Path) -> None:
     envrc_path = tmp_path / ENVRC_FILENAME
+    assert is_world_writable(envrc_path) is False
+
+
+def test_is_group_writable_missing_file(tmp_path: Path) -> None:
+    envrc_path = tmp_path / ENVRC_FILENAME
+    assert is_group_writable(envrc_path) is False
+
+
+def test_is_group_writable_detects_permissions(tmp_path: Path) -> None:
+    envrc_path = tmp_path / ENVRC_FILENAME
+    envrc_path.write_text("# placeholder\n", encoding="utf-8")
+
+    os.chmod(envrc_path, 0o660)
+    assert is_group_writable(envrc_path) is True
     assert is_world_writable(envrc_path) is False
 
 
