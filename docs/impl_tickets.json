@@ -266,11 +266,12 @@
         {
           "id": "p5-02",
           "title": "Centralize external command runner",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Command inventory"],
           "outputs": [
             "Shared command runner helper",
-            "Consistent error handling for subprocess calls"
+            "Consistent error handling for subprocess calls",
+            "src/envrctl/command_runner.py"
           ]
         },
         {
