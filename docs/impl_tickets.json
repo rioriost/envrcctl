@@ -277,11 +277,14 @@
         {
           "id": "p5-03",
           "title": "Argument validation and allowlist",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Command runner helper"],
           "outputs": [
             "Argument allowlists for each command",
-            "Validation of dynamic inputs"
+            "Validation of dynamic inputs",
+            "src/envrctl/command_runner.py",
+            "src/envrctl/keychain.py",
+            "src/envrctl/secretservice.py"
           ]
         },
         {

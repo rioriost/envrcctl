@@ -59,5 +59,6 @@ def _run_secret_tool(args: List[str], input_text: str | None = None) -> str:
     return run_command(
         args,
         input_text=input_text,
+        allowed_commands={"secret-tool"},
         error_message="SecretService command failed.",
     )

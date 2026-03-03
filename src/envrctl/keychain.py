@@ -21,6 +21,7 @@ class KeychainBackend(SecretBackend):
                 ref.account,
                 "-w",
             ],
+            allowed_commands={"security"},
             error_message="Keychain command failed.",
         )
         return result.strip()
@@ -40,6 +41,7 @@ class KeychainBackend(SecretBackend):
                 "-w",
             ],
             input_text=value + "\n",
+            allowed_commands={"security"},
             error_message="Keychain command failed.",
         )
 
@@ -53,6 +55,7 @@ class KeychainBackend(SecretBackend):
                 "-a",
                 ref.account,
             ],
+            allowed_commands={"security"},
             error_message="Keychain command failed.",
         )
 
