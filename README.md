@@ -31,7 +31,7 @@ It is designed for macOS first, with Linux support via SecretService.
 Tap and install:
 
 ```sh
-brew tap <YOUR_TAP>
+brew tap rioriost/envrcctl
 brew install envrcctl
 ```
 
