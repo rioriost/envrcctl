@@ -7,77 +7,98 @@
       "id": "phase-1",
       "name": "Phase 1 — MVP (macOS)",
       "goal": "CLI for managed .envrc with non-secret/secret CRUD, inherit toggle, inject, macOS Keychain backend.",
-      "status": "planned",
+      "status": "in-progress",
       "tasks": [
         {
           "id": "p1-01",
           "title": "Project layout and CLI entrypoint",
-          "status": "planned",
+          "status": "done",
           "inputs": ["CLI framework decision (Typer/Click)"],
-          "outputs": ["Python package skeleton", "CLI entrypoint with command routing"]
+          "outputs": [
+            "Python package skeleton",
+            "CLI entrypoint with command routing"
+          ]
         },
         {
           "id": "p1-02",
           "title": "Managed block parsing and regeneration",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Managed block markers specification"],
-          "outputs": ["Parser for existing .envrc", "Regenerator for managed block", "Preservation of unmanaged content"]
+          "outputs": [
+            "Parser for existing .envrc",
+            "Regenerator for managed block",
+            "Preservation of unmanaged content"
+          ]
         },
         {
           "id": "p1-03",
           "title": "Managed block internal model",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Managed block format", "Secret ref schema"],
-          "outputs": ["Data model for inherit, exports, secret refs, inject line"]
+          "outputs": [
+            "Data model for inherit, exports, secret refs, inject line"
+          ]
         },
         {
           "id": "p1-04",
           "title": "Atomic .envrc writer",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Filesystem atomic write strategy"],
-          "outputs": ["Temp write + atomic replace", "Optional permissions warning"]
+          "outputs": [
+            "Temp write + atomic replace",
+            "Optional permissions warning"
+          ]
         },
         {
           "id": "p1-05",
           "title": "Non-secret CRUD commands",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Managed block model", "CLI skeleton"],
           "outputs": ["set/unset/get/list for non-secret exports"]
         },
         {
           "id": "p1-06",
           "title": "Secret backend interface",
-          "status": "planned",
+          "status": "done",
           "inputs": ["SecretBackend interface spec"],
-          "outputs": ["Abstract interface for get/set/delete/list", "Ref format validation"]
+          "outputs": [
+            "Abstract interface for get/set/delete/list",
+            "Ref format validation"
+          ]
         },
         {
           "id": "p1-07",
           "title": "macOS Keychain backend",
-          "status": "planned",
+          "status": "done",
           "inputs": ["SecretBackend interface", "/usr/bin/security usage"],
           "outputs": ["Keychain backend implementation"]
         },
         {
           "id": "p1-08",
           "title": "Secret CRUD commands",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Keychain backend", "Managed block model"],
-          "outputs": ["secret set/unset/list commands", "Ref entries in managed block"]
+          "outputs": [
+            "secret set/unset/list commands",
+            "Ref entries in managed block"
+          ]
         },
         {
           "id": "p1-09",
           "title": "Inject command",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Secret refs in managed block", "Secret backend"],
           "outputs": ["inject prints export lines with resolved secrets"]
         },
         {
           "id": "p1-10",
           "title": "Init and inherit commands",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Managed block generator", ".envrc writer"],
-          "outputs": ["init inserts managed block", "inherit on/off toggles source_up"]
+          "outputs": [
+            "init inserts managed block",
+            "inherit on/off toggles source_up"
+          ]
         },
         {
           "id": "p1-11",
@@ -99,14 +120,18 @@
           "title": "Eval command (masked view)",
           "status": "planned",
           "inputs": ["Managed block model", "Inheritance rules"],
-          "outputs": ["eval shows effective env with masked secrets and source attribution"]
+          "outputs": [
+            "eval shows effective env with masked secrets and source attribution"
+          ]
         },
         {
           "id": "p2-02",
           "title": "Doctor command (security checks)",
           "status": "planned",
           "inputs": [".envrc parser", "Permissions inspection"],
-          "outputs": ["doctor warnings for insecure permissions and missing inject line"]
+          "outputs": [
+            "doctor warnings for insecure permissions and missing inject line"
+          ]
         },
         {
           "id": "p2-03",
@@ -127,7 +152,9 @@
           "title": "Phase 2 docs",
           "status": "planned",
           "inputs": ["New commands behavior"],
-          "outputs": ["Updated docs and examples for eval/doctor/migrate/completions"]
+          "outputs": [
+            "Updated docs and examples for eval/doctor/migrate/completions"
+          ]
         }
       ]
     },
