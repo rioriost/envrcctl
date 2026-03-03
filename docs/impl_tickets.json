@@ -460,11 +460,15 @@
           "id": "p6-06",
           "title": "Runtime/admin separation for secret refs",
           "status": "planned",
-          "inputs": ["Secret ref schema", "Exec injection rules"],
+          "inputs": [
+            "Current ref format (<scheme>:<service>:<account>)",
+            "Kind encoding options (suffix vs metadata)",
+            "Exec injection policy (runtime-only)"
+          ],
           "outputs": [
-            "Ref schema extended with runtime/admin kind",
-            "Exec injection filtered to runtime secrets only",
-            "Notes for migration or defaults"
+            "Concrete ref kind format, e.g. kc:service:account:runtime (default runtime)",
+            "Parsing/validation rules for kind (runtime/admin only)",
+            "Migration guidance for existing refs (assume runtime)"
           ]
         },
         {
@@ -473,13 +477,13 @@
           "status": "planned",
           "inputs": [
             "Secret backend access",
-            "TTY detection strategy",
-            "Clipboard integration"
+            "TTY detection strategy (stdin/stdout isatty)",
+            "Clipboard command availability (pbcopy/pbpaste, xclip/xsel)"
           ],
           "outputs": [
-            "secret get command with masked output",
-            "Clipboard-only default behavior",
-            "Plaintext output gated by explicit override flags"
+            "secret get prints masked value (e.g., first/last 4) and copies to clipboard",
+            "Non-interactive runs skip clipboard and error unless --force-plain",
+            "Flags: --plain/--show gated by TTY, --force-plain override"
           ]
         }
       ]
