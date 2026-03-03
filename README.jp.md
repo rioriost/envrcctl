@@ -179,4 +179,4 @@ exec は runtime のみ注入します。
 
 ## ライセンス
 
-`LICENSE` を参照してください。
+MIT

@@ -228,4 +228,4 @@ uv sync
 
 ## License
 
-See `LICENSE`.
+MIT
