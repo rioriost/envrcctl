@@ -84,3 +84,8 @@ def test_secretservice_commands(monkeypatch) -> None:
     assert calls[0][:2] == ["secret-tool", "lookup"]
     assert calls[1][0:2] == ["secret-tool", "store"]
     assert calls[2][0:2] == ["secret-tool", "clear"]
+
+
+def test_secretservice_list_returns_empty() -> None:
+    backend = SecretServiceBackend()
+    assert backend.list() == []

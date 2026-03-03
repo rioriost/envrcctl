@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Dict
@@ -183,6 +184,114 @@ def test_cli_exec_rejects_admin_when_selected(tmp_path: Path, monkeypatch) -> No
     )
     assert result.exit_code == 1
     assert "admin" in result.stderr
+
+
+def test_cli_secret_get_missing_ref(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    runner.invoke(cli.app, ["init"])
+    result = runner.invoke(cli.app, ["secret", "get", "MISSING"])
+    assert result.exit_code == 1
+    assert "no secret reference" in result.stderr
+
+
+def test_cli_exec_requires_command(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    runner.invoke(cli.app, ["init"])
+    result = runner.invoke(cli.app, ["exec"])
+    assert result.exit_code == 1
+    assert "No command provided" in result.stderr
+
+
+def test_cli_exec_missing_selected_secret(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    runner.invoke(cli.app, ["init"])
+    result = runner.invoke(
+        cli.app,
+        ["exec", "-k", "MISSING", "--", sys.executable, "-c", "print('x')"],
+    )
+    assert result.exit_code == 1
+    assert "Secrets not found" in result.stderr
+
+
+def test_cli_exec_includes_exports_and_selected_secrets(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    dummy = DummyBackend()
+
+    monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
+    monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
+
+    runner.invoke(cli.app, ["init"])
+    runner.invoke(cli.app, ["set", "FOO", "bar"])
+    runner.invoke(
+        cli.app,
+        ["secret", "set", "TOKEN", "--account", "acct", "--stdin"],
+        input="secretvalue",
+    )
+    runner.invoke(
+        cli.app,
+        ["secret", "set", "OTHER", "--account", "other", "--stdin"],
+        input="othervalue",
+    )
+
+    script = (
+        "import os, sys; "
+        "sys.exit(0 if (os.getenv('FOO')=='bar' and "
+        "os.getenv('TOKEN')=='secretvalue' and "
+        "os.getenv('OTHER') is None) else 1)"
+    )
+    result = runner.invoke(
+        cli.app, ["exec", "-k", "TOKEN", "--", sys.executable, "-c", script]
+    )
+    assert result.exit_code == 0
+
+
+def test_cli_exec_propagates_exit_code(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    runner.invoke(cli.app, ["init"])
+    result = runner.invoke(
+        cli.app, ["exec", "--", sys.executable, "-c", "import sys; sys.exit(2)"]
+    )
+    assert result.exit_code == 2
+
+
+def test_cli_doctor_warns_on_symlink(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    target = tmp_path / "real.envrc"
+    target.write_text(
+        render_managed_block(ManagedBlock(include_inject=True)), encoding="utf-8"
+    )
+    envrc_path = tmp_path / ENVRC_FILENAME
+    envrc_path.symlink_to(target)
+
+    result = runner.invoke(cli.app, ["doctor"])
+    assert result.exit_code == 0
+    assert "symlink" in result.stderr
+
+
+def test_cli_doctor_warns_on_group_writable(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    runner.invoke(cli.app, ["init"])
+    envrc_path = tmp_path / ENVRC_FILENAME
+    os.chmod(envrc_path, 0o660)
+
+    result = runner.invoke(cli.app, ["doctor"])
+    assert result.exit_code == 0
+    assert "group-writable" in result.stderr
 
 
 def test_cli_inject_requires_tty(tmp_path: Path, monkeypatch) -> None:

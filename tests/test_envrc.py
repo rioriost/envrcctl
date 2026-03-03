@@ -121,6 +121,17 @@ def test_write_envrc_rejects_symlink_path(tmp_path: Path) -> None:
         write_envrc(link, doc, block)
 
 
+def test_write_envrc_rejects_non_file_path(tmp_path: Path) -> None:
+    envrc_path = tmp_path / ENVRC_FILENAME
+    envrc_path.mkdir()
+
+    doc = EnvrcDocument(before="", after="", managed=None, has_block=False)
+    block = ManagedBlock(exports={"FOO": "bar"}, include_inject=True)
+
+    with pytest.raises(EnvrcctlError):
+        write_envrc(envrc_path, doc, block)
+
+
 def test_write_envrc_rejects_symlink_parent(tmp_path: Path) -> None:
     real_dir = tmp_path / "real"
     real_dir.mkdir()

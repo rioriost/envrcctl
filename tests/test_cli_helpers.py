@@ -109,3 +109,20 @@ def test_confirm_or_abort_assume_yes_skips(monkeypatch) -> None:
     monkeypatch.setattr(cli.typer, "confirm", fake_confirm)
     cli._confirm_or_abort("confirm?", True)
     assert called["ok"] is False
+
+
+def test_write_envrc_raises_when_world_writable_after_write(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from envrctl.envrc import load_envrc
+    from envrctl.managed_block import ManagedBlock
+
+    envrc_path = tmp_path / ENVRC_FILENAME
+    doc = load_envrc(envrc_path)
+    block = ManagedBlock()
+
+    monkeypatch.setattr(cli, "_envrc_path", lambda: envrc_path)
+    monkeypatch.setattr(cli, "write_envrc", lambda path, doc, block: True)
+
+    with pytest.raises(EnvrcctlError):
+        cli._write_envrc(doc, block)

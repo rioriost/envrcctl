@@ -120,3 +120,8 @@ def test_keychain_error_redacts_secret(monkeypatch) -> None:
 
     assert secret not in str(exc.value)
     assert "[REDACTED]" in str(exc.value)
+
+
+def test_keychain_list_returns_empty() -> None:
+    backend = KeychainBackend()
+    assert backend.list() == []

@@ -138,3 +138,49 @@ def test_backend_for_scheme_ss_requires_secret_tool(monkeypatch) -> None:
 def test_backend_for_scheme_unknown() -> None:
     with pytest.raises(EnvrcctlError):
         secrets._backend_for_scheme("nope")
+
+
+def test_format_ref_rejects_invalid_kind() -> None:
+    with pytest.raises(EnvrcctlError):
+        secrets.format_ref("svc", "acct", kind="weird")
+
+
+def test_parse_ref_rejects_empty_account_with_kind() -> None:
+    with pytest.raises(EnvrcctlError):
+        secrets.parse_ref("kc:svc::runtime")
+
+
+def test_backend_for_scheme_returns_keychain(monkeypatch) -> None:
+    class DummyKeychainBackend:
+        pass
+
+    monkeypatch.setattr(secrets.sys, "platform", "darwin")
+    import envrctl.keychain as keychain
+
+    monkeypatch.setattr(keychain, "KeychainBackend", DummyKeychainBackend)
+
+    backend = secrets._backend_for_scheme("kc")
+    assert isinstance(backend, DummyKeychainBackend)
+
+
+def test_backend_for_scheme_returns_secretservice(monkeypatch) -> None:
+    class DummySecretServiceBackend:
+        pass
+
+    monkeypatch.setattr(secrets, "_have_cmd", lambda cmd: True)
+    import envrctl.secretservice as secretservice
+
+    monkeypatch.setattr(
+        secretservice, "SecretServiceBackend", DummySecretServiceBackend
+    )
+
+    backend = secrets._backend_for_scheme("ss")
+    assert isinstance(backend, DummySecretServiceBackend)
+
+
+def test_have_cmd_checks_path(monkeypatch) -> None:
+    monkeypatch.setattr(secrets.shutil, "which", lambda cmd: "/bin/echo")
+    assert secrets._have_cmd("echo") is True
+
+    monkeypatch.setattr(secrets.shutil, "which", lambda cmd: None)
+    assert secrets._have_cmd("missing") is False
