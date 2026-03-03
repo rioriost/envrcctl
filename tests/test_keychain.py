@@ -26,7 +26,7 @@ def test_keychain_get_calls_security(monkeypatch) -> None:
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     backend = KeychainBackend()
-    ref = SecretRef(scheme="kc", service="svc", account="acct")
+    ref = SecretRef(scheme="kc", service="svc", account="acct", kind="runtime")
 
     value = backend.get(ref)
     assert value == "secret"
@@ -45,7 +45,7 @@ def test_keychain_set_uses_stdin(monkeypatch) -> None:
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     backend = KeychainBackend()
-    ref = SecretRef(scheme="kc", service="svc", account="acct")
+    ref = SecretRef(scheme="kc", service="svc", account="acct", kind="runtime")
 
     backend.set(ref, "value")
     args, kwargs = calls[0]
@@ -65,7 +65,7 @@ def test_keychain_delete_calls_security(monkeypatch) -> None:
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     backend = KeychainBackend()
-    ref = SecretRef(scheme="kc", service="svc", account="acct")
+    ref = SecretRef(scheme="kc", service="svc", account="acct", kind="runtime")
 
     backend.delete(ref)
     args, _ = calls[0]
@@ -81,7 +81,7 @@ def test_keychain_error_prefers_stderr(monkeypatch) -> None:
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     backend = KeychainBackend()
-    ref = SecretRef(scheme="kc", service="svc", account="acct")
+    ref = SecretRef(scheme="kc", service="svc", account="acct", kind="runtime")
 
     with pytest.raises(EnvrcctlError) as exc:
         backend.get(ref)
@@ -96,7 +96,7 @@ def test_keychain_error_falls_back_to_stdout(monkeypatch) -> None:
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     backend = KeychainBackend()
-    ref = SecretRef(scheme="kc", service="svc", account="acct")
+    ref = SecretRef(scheme="kc", service="svc", account="acct", kind="runtime")
 
     with pytest.raises(EnvrcctlError) as exc:
         backend.get(ref)
@@ -113,7 +113,7 @@ def test_keychain_error_redacts_secret(monkeypatch) -> None:
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     backend = KeychainBackend()
-    ref = SecretRef(scheme="kc", service="svc", account="acct")
+    ref = SecretRef(scheme="kc", service="svc", account="acct", kind="runtime")
 
     with pytest.raises(EnvrcctlError) as exc:
         backend.set(ref, secret)

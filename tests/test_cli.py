@@ -124,6 +124,67 @@ def test_cli_exec_injects_secrets_into_child(tmp_path: Path, monkeypatch) -> Non
     assert result.exit_code == 0
 
 
+def test_cli_exec_skips_admin_secrets(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    dummy = DummyBackend()
+
+    monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
+    monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
+
+    runner.invoke(cli.app, ["init"])
+    runner.invoke(
+        cli.app,
+        [
+            "secret",
+            "set",
+            "ADMIN_TOKEN",
+            "--account",
+            "acct",
+            "--kind",
+            "admin",
+            "--stdin",
+        ],
+        input="secretvalue",
+    )
+
+    script = "import os, sys; sys.exit(0 if os.getenv('ADMIN_TOKEN') is None else 1)"
+    result = runner.invoke(cli.app, ["exec", "--", sys.executable, "-c", script])
+    assert result.exit_code == 0
+
+
+def test_cli_exec_rejects_admin_when_selected(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    dummy = DummyBackend()
+
+    monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
+    monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
+
+    runner.invoke(cli.app, ["init"])
+    runner.invoke(
+        cli.app,
+        [
+            "secret",
+            "set",
+            "ADMIN_TOKEN",
+            "--account",
+            "acct",
+            "--kind",
+            "admin",
+            "--stdin",
+        ],
+        input="secretvalue",
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["exec", "-k", "ADMIN_TOKEN", "--", sys.executable, "-c", "print('x')"],
+    )
+    assert result.exit_code == 1
+    assert "admin" in result.stderr
+
+
 def test_cli_inject_requires_tty(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
@@ -142,6 +203,76 @@ def test_cli_inject_requires_tty(tmp_path: Path, monkeypatch) -> None:
     result = runner.invoke(cli.app, ["inject"])
     assert result.exit_code == 1
     assert "inject is blocked" in result.stderr
+
+
+def test_cli_secret_get_copies_masked(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    dummy = DummyBackend()
+    copied: Dict[str, str] = {}
+
+    monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
+    monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
+    monkeypatch.setattr(cli, "_is_interactive", lambda: True)
+    monkeypatch.setattr(
+        cli, "_copy_to_clipboard", lambda value: copied.setdefault("value", value)
+    )
+
+    runner.invoke(cli.app, ["init"])
+    runner.invoke(
+        cli.app,
+        ["secret", "set", "TOKEN", "--account", "acct", "--stdin"],
+        input="supersecretvalue",
+    )
+
+    result = runner.invoke(cli.app, ["secret", "get", "TOKEN"])
+    assert result.exit_code == 0
+    assert copied["value"] == "supersecretvalue"
+    assert "TOKEN=" in result.stdout
+    assert "supersecretvalue" not in result.stdout
+
+
+def test_cli_secret_get_plain_interactive(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    dummy = DummyBackend()
+
+    monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
+    monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
+    monkeypatch.setattr(cli, "_is_interactive", lambda: True)
+
+    runner.invoke(cli.app, ["init"])
+    runner.invoke(
+        cli.app,
+        ["secret", "set", "TOKEN", "--account", "acct", "--stdin"],
+        input="supersecretvalue",
+    )
+
+    result = runner.invoke(cli.app, ["secret", "get", "TOKEN", "--plain"])
+    assert result.exit_code == 0
+    assert result.stdout.strip() == "supersecretvalue"
+
+
+def test_cli_secret_get_force_plain_non_interactive(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    dummy = DummyBackend()
+
+    monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
+    monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
+
+    runner.invoke(cli.app, ["init"])
+    runner.invoke(
+        cli.app,
+        ["secret", "set", "TOKEN", "--account", "acct", "--stdin"],
+        input="supersecretvalue",
+    )
+
+    result = runner.invoke(cli.app, ["secret", "get", "TOKEN", "--force-plain"])
+    assert result.exit_code == 0
+    assert result.stdout.strip() == "supersecretvalue"
 
 
 def test_cli_outputs_do_not_leak_secret_except_inject(

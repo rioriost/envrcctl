@@ -9,9 +9,15 @@ def test_parse_ref_valid_and_invalid() -> None:
     assert ref.scheme == "kc"
     assert ref.service == "svc"
     assert ref.account == "acct"
+    assert ref.kind == "runtime"
 
     ref = secrets.parse_ref("kc:svc:openai:prod")
     assert ref.account == "openai:prod"
+    assert ref.kind == "runtime"
+
+    ref = secrets.parse_ref("kc:svc:openai:prod:admin")
+    assert ref.account == "openai:prod"
+    assert ref.kind == "admin"
 
     with pytest.raises(EnvrcctlError):
         secrets.parse_ref("invalid")
@@ -33,7 +39,7 @@ def test_parse_ref_valid_and_invalid() -> None:
 
 
 def test_format_ref_scheme_validation() -> None:
-    assert secrets.format_ref("svc", "acct", scheme="kc") == "kc:svc:acct"
+    assert secrets.format_ref("svc", "acct", scheme="kc") == "kc:svc:acct:runtime"
 
     with pytest.raises(EnvrcctlError):
         secrets.format_ref("svc", "acct", scheme="nope")
@@ -65,7 +71,7 @@ def test_backend_for_ref_dispatch(monkeypatch) -> None:
     sentinel = object()
     monkeypatch.setattr(secrets, "_backend_for_scheme", lambda scheme: sentinel)
 
-    ref = secrets.SecretRef(scheme="kc", service="svc", account="acct")
+    ref = secrets.SecretRef(scheme="kc", service="svc", account="acct", kind="runtime")
     assert secrets.backend_for_ref(ref) is sentinel
 
 

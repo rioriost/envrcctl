@@ -23,7 +23,7 @@ def test_secretservice_error_prefers_stderr(monkeypatch) -> None:
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     backend = SecretServiceBackend()
-    ref = SecretRef(scheme="ss", service="svc", account="acct")
+    ref = SecretRef(scheme="ss", service="svc", account="acct", kind="runtime")
 
     with pytest.raises(EnvrcctlError) as exc:
         backend.get(ref)
@@ -38,7 +38,7 @@ def test_secretservice_error_falls_back_to_stdout(monkeypatch) -> None:
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     backend = SecretServiceBackend()
-    ref = SecretRef(scheme="ss", service="svc", account="acct")
+    ref = SecretRef(scheme="ss", service="svc", account="acct", kind="runtime")
 
     with pytest.raises(EnvrcctlError) as exc:
         backend.get(ref)
@@ -55,7 +55,7 @@ def test_secretservice_error_redacts_input(monkeypatch) -> None:
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     backend = SecretServiceBackend()
-    ref = SecretRef(scheme="ss", service="svc", account="acct")
+    ref = SecretRef(scheme="ss", service="svc", account="acct", kind="runtime")
 
     with pytest.raises(EnvrcctlError) as exc:
         backend.set(ref, secret)
@@ -75,7 +75,7 @@ def test_secretservice_commands(monkeypatch) -> None:
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     backend = SecretServiceBackend()
-    ref = SecretRef(scheme="ss", service="svc", account="acct")
+    ref = SecretRef(scheme="ss", service="svc", account="acct", kind="runtime")
 
     assert backend.get(ref) == "value"
     backend.set(ref, "secret")

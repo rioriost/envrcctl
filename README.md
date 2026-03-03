@@ -11,7 +11,10 @@ It is designed for macOS first, with Linux support via SecretService.
 - Non-secret environment variables (CRUD)
 - Secrets stored in Keychain (macOS) or SecretService (Linux)
 - Inheritance control (`source_up` on/off)
-- Secret injection for direnv (`eval "$(envrcctl inject)"`)
+- Exec-based secret injection (`envrcctl exec -- ...`)
+- Secret injection for direnv (`eval "$(envrcctl inject)"`, TTY-guarded)
+- Secret kinds (runtime/admin), with exec injecting runtime only
+- Secret get with clipboard default and TTY guard
 - Diagnostics and migration helpers
 - Shell completion scripts
 
@@ -108,9 +111,12 @@ envrcctl list
 ### Secrets
 
 ```sh
-envrcctl secret set OPENAI_API_KEY --account openai:prod
+envrcctl secret set OPENAI_API_KEY --account openai:prod --kind runtime
+envrcctl secret set OPENAI_API_KEY --account openai:admin --kind admin
 envrcctl secret unset OPENAI_API_KEY
 envrcctl secret list
+envrcctl secret get OPENAI_API_KEY
+envrcctl secret get OPENAI_API_KEY --plain
 ```
 
 For CI-safe input:
@@ -119,11 +125,22 @@ For CI-safe input:
 echo -n "$OPENAI_API_KEY" | envrcctl secret set OPENAI_API_KEY --account openai:prod --stdin
 ```
 
+### Exec secrets without stdout
+
+```sh
+envrcctl exec -- python script.py
+envrcctl exec -k OPENAI_API_KEY -- python script.py
+```
+
+Exec injects runtime secrets only.
+
 ### Inject secrets for direnv
 
 ```sh
 envrcctl inject
 ```
+
+Non-interactive runs are blocked unless `--force` is provided.
 
 ### Effective view (masked)
 
@@ -163,14 +180,16 @@ ENVRCCTL_BACKEND=ss envrcctl secret set OPENAI_API_KEY --account openai:prod
 Secret references are stored as:
 
 ```
-<scheme>:<service>:<account>
+<scheme>:<service>:<account>:<kind>
 ```
+
+`kind` is `runtime` or `admin` (default: `runtime`).
 
 Example:
 
 ```
-kc:st.rio.envrcctl:openai:prod
-ss:st.rio.envrcctl:openai:prod
+kc:st.rio.envrcctl:openai:prod:runtime
+kc:st.rio.envrcctl:openai:admin:admin
 ```
 
 ## Shell Completion
@@ -193,6 +212,8 @@ uv run python scripts/generate_completions.py
 - Secrets are never written to `.envrc`
 - Secrets are never passed in CLI arguments
 - `.envrc` updates are atomic
+- `inject` is blocked in non-interactive environments unless `--force` is provided
+- `secret get` is clipboard-only by default; plaintext output is TTY-guarded
 - The tool refuses to write to world-writable `.envrc`
 
 ## Development

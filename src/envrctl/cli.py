@@ -4,6 +4,7 @@ import getpass
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Callable
 
 import typer
 
+from .command_runner import run_command
 from .envrc import (
     ENVRC_FILENAME,
     ensure_managed_block,
@@ -64,6 +66,36 @@ def _run(action: Callable[[], None]) -> None:
 
 def _is_interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _mask_secret(value: str) -> str:
+    if len(value) <= 8:
+        return "*" * len(value)
+    return f"{value[:4]}...{value[-4:]}"
+
+
+def _clipboard_command() -> list[str] | None:
+    if sys.platform == "darwin" and shutil.which("pbcopy"):
+        return ["pbcopy"]
+    if shutil.which("xclip"):
+        return ["xclip", "-selection", "clipboard"]
+    if shutil.which("xsel"):
+        return ["xsel", "--clipboard", "--input"]
+    return None
+
+
+def _copy_to_clipboard(value: str) -> None:
+    cmd = _clipboard_command()
+    if not cmd:
+        raise EnvrcctlError(
+            "Clipboard tool not available. Install pbcopy/xclip/xsel or use --plain."
+        )
+    run_command(
+        cmd,
+        input_text=value,
+        allowed_commands={cmd[0]},
+        error_message="Clipboard command failed.",
+    )
 
 
 def _validate_env_var(name: str) -> None:
@@ -193,6 +225,7 @@ def secret_set(
     service: str = typer.Option(
         DEFAULT_SERVICE, "--service", help="Keychain service name."
     ),
+    kind: str = typer.Option("runtime", "--kind", help="Secret kind (runtime/admin)."),
     stdin: bool = typer.Option(False, "--stdin", help="Read secret from stdin."),
 ) -> None:
     """Store a secret and add its reference to the managed block."""
@@ -207,7 +240,7 @@ def secret_set(
         if not value:
             raise EnvrcctlError("Secret value is empty.")
         scheme, backend = resolve_backend()
-        ref = format_ref(service, account, scheme=scheme)
+        ref = format_ref(service, account, scheme=scheme, kind=kind)
         backend.set(parse_ref(ref), value)
 
         doc = load_envrc(_envrc_path())
@@ -252,6 +285,47 @@ def secret_list() -> None:
     _run(action)
 
 
+@secret_app.command("get")
+def secret_get(
+    var: str,
+    plain: bool = typer.Option(False, "--plain", help="Print the secret value."),
+    show: bool = typer.Option(False, "--show", help="Alias for --plain."),
+    force_plain: bool = typer.Option(
+        False, "--force-plain", help="Allow plaintext output in non-interactive runs."
+    ),
+) -> None:
+    """Get a secret value (masked by default, clipboard-only)."""
+
+    def action() -> None:
+        _validate_env_var(var)
+        doc = load_envrc(_envrc_path())
+        block = ensure_managed_block(doc)
+        ref = block.secret_refs.get(var)
+        if not ref:
+            raise EnvrcctlError(f"{var} has no secret reference.")
+        parsed = parse_ref(ref)
+        backend = backend_for_ref(parsed)
+        value = backend.get(parsed)
+
+        if not _is_interactive():
+            if not force_plain:
+                raise EnvrcctlError(
+                    "secret get is blocked in non-interactive environments. Use --force-plain to override."
+                )
+            typer.echo(value)
+            return
+
+        if plain or show:
+            typer.echo(value)
+            return
+
+        _copy_to_clipboard(value)
+        masked = _mask_secret(value)
+        typer.echo(f"Copied to clipboard: {var}={masked}")
+
+    _run(action)
+
+
 @app.command()
 def inject(
     force: bool = typer.Option(
@@ -269,6 +343,8 @@ def inject(
         block = ensure_managed_block(doc)
         for key in sorted(block.secret_refs.keys()):
             ref = parse_ref(block.secret_refs[key])
+            if ref.kind != "runtime":
+                continue
             backend = backend_for_ref(ref)
             value = backend.get(ref)
             typer.echo(f"export {key}={shlex.quote(value)}")
@@ -297,9 +373,10 @@ def exec_cmd(
         doc = load_envrc(_envrc_path())
         block = ensure_managed_block(doc)
 
-        selected_keys = set(key) if key else None
+        selected_keys = {item for item in key} if key else None
         if selected_keys is not None:
-            missing = selected_keys - set(block.secret_refs.keys())
+            available_keys = {item for item in block.secret_refs.keys()}
+            missing = selected_keys - available_keys
             if missing:
                 missing_list = ", ".join(sorted(missing))
                 raise EnvrcctlError(
@@ -313,6 +390,12 @@ def exec_cmd(
             if selected_keys is not None and name not in selected_keys:
                 continue
             ref = parse_ref(block.secret_refs[name])
+            if ref.kind != "runtime":
+                if selected_keys is not None and name in selected_keys:
+                    raise EnvrcctlError(
+                        f"Secret {name} is admin and cannot be injected via exec."
+                    )
+                continue
             backend = backend_for_ref(ref)
             env[name] = backend.get(ref)
 

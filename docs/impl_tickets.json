@@ -449,7 +449,7 @@
         {
           "id": "p6-05",
           "title": "Docs updates for exec and inject safety",
-          "status": "planned",
+          "status": "done",
           "inputs": ["New exec/TTY guard behavior"],
           "outputs": [
             "README updates with exec as recommended flow",
@@ -459,7 +459,7 @@
         {
           "id": "p6-06",
           "title": "Runtime/admin separation for secret refs",
-          "status": "planned",
+          "status": "done",
           "inputs": [
             "Current ref format (<scheme>:<service>:<account>)",
             "Kind encoding options (suffix vs metadata)",
@@ -474,7 +474,7 @@
         {
           "id": "p6-07",
           "title": "Secret get command with TTY guard and clipboard mode",
-          "status": "planned",
+          "status": "done",
           "inputs": [
             "Secret backend access",
             "TTY detection strategy (stdin/stdout isatty)",

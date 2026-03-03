@@ -11,6 +11,7 @@ from .errors import EnvrcctlError
 
 DEFAULT_SERVICE = "st.rio.envrcctl"
 SUPPORTED_SCHEMES = ("kc", "ss")
+SUPPORTED_KINDS = ("runtime", "admin")
 SERVICE_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 ACCOUNT_RE = re.compile(r"^[A-Za-z0-9._:-]+$")
 
@@ -20,11 +21,22 @@ def _validate_ref_part(label: str, value: str, pattern: re.Pattern[str]) -> None
         raise EnvrcctlError(f"Invalid secret ref {label}: {value}")
 
 
+def _normalize_kind(kind: str) -> str:
+    normalized = kind.strip().lower()
+    if normalized not in SUPPORTED_KINDS:
+        supported = ", ".join(SUPPORTED_KINDS)
+        raise EnvrcctlError(
+            f"Invalid secret kind: {kind}. Supported kinds: {supported}."
+        )
+    return normalized
+
+
 @dataclass(frozen=True)
 class SecretRef:
     scheme: str
     service: str
     account: str
+    kind: str
 
 
 class SecretBackend(Protocol):
@@ -41,20 +53,36 @@ def parse_ref(ref: str) -> SecretRef:
     parts = ref.split(":", 2)
     if len(parts) != 3:
         raise EnvrcctlError(f"Invalid secret ref: {ref}")
-    scheme, service, account = parts
+    scheme, service, rest = parts
+    if scheme not in SUPPORTED_SCHEMES:
+        raise EnvrcctlError(f"Unsupported secret backend scheme: {scheme}")
+    _validate_ref_part("service", service, SERVICE_RE)
+
+    if rest.endswith(":runtime") or rest.endswith(":admin"):
+        account, kind = rest.rsplit(":", 1)
+        if not account:
+            raise EnvrcctlError(f"Invalid secret ref account: {rest}")
+    else:
+        account = rest
+        kind = "runtime"
+
+    _validate_ref_part("account", account, ACCOUNT_RE)
+    kind = _normalize_kind(kind)
+    return SecretRef(scheme=scheme, service=service, account=account, kind=kind)
+
+
+def format_ref(
+    service: str,
+    account: str,
+    scheme: str = "kc",
+    kind: str = "runtime",
+) -> str:
     if scheme not in SUPPORTED_SCHEMES:
         raise EnvrcctlError(f"Unsupported secret backend scheme: {scheme}")
     _validate_ref_part("service", service, SERVICE_RE)
     _validate_ref_part("account", account, ACCOUNT_RE)
-    return SecretRef(scheme=scheme, service=service, account=account)
-
-
-def format_ref(service: str, account: str, scheme: str = "kc") -> str:
-    if scheme not in SUPPORTED_SCHEMES:
-        raise EnvrcctlError(f"Unsupported secret backend scheme: {scheme}")
-    _validate_ref_part("service", service, SERVICE_RE)
-    _validate_ref_part("account", account, ACCOUNT_RE)
-    return f"{scheme}:{service}:{account}"
+    kind = _normalize_kind(kind)
+    return f"{scheme}:{service}:{account}:{kind}"
 
 
 def resolve_backend(scheme: str | None = None) -> tuple[str, SecretBackend]:

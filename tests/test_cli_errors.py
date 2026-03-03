@@ -51,6 +51,42 @@ def test_secret_set_rejects_empty_value(tmp_path: Path, monkeypatch) -> None:
     assert "Secret value is empty" in result.stderr
 
 
+def test_secret_get_blocked_in_non_interactive(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    class DummyBackend:
+        def __init__(self) -> None:
+            self._store: dict[tuple[str, str], str] = {}
+
+        def get(self, ref) -> str:
+            return self._store[(ref.service, ref.account)]
+
+        def set(self, ref, value: str) -> None:
+            self._store[(ref.service, ref.account)] = value
+
+        def delete(self, ref) -> None:
+            self._store.pop((ref.service, ref.account), None)
+
+        def list(self, prefix: str | None = None):
+            return []
+
+    dummy = DummyBackend()
+    monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
+    monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
+
+    runner.invoke(cli.app, ["init"])
+    runner.invoke(
+        cli.app,
+        ["secret", "set", "TOKEN", "--account", "acct", "--stdin"],
+        input="secretvalue",
+    )
+
+    result = runner.invoke(cli.app, ["secret", "get", "TOKEN"])
+    assert result.exit_code == 1
+    assert "secret get is blocked in non-interactive environments" in result.stderr
+
+
 def test_inject_blocked_in_non_interactive(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
