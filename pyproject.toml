@@ -18,9 +18,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/envrcctl"]
+include = ["completions/**"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/envrcctl/**", "README.md", "LICENSE", "pyproject.toml"]
+include = ["src/envrcctl/**", "completions/**", "README.md", "LICENSE", "pyproject.toml"]
 
 [dependency-groups]
 dev = [
