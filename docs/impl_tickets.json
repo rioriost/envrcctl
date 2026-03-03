@@ -290,7 +290,7 @@
         {
           "id": "p5-04",
           "title": "Redact secrets in error paths",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Error paths and output flows"],
           "outputs": [
             "Sanitized error messages",

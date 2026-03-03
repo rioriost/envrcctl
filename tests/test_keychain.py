@@ -102,3 +102,21 @@ def test_keychain_error_falls_back_to_stdout(monkeypatch) -> None:
         backend.get(ref)
 
     assert "oops" in str(exc.value)
+
+
+def test_keychain_error_redacts_secret(monkeypatch) -> None:
+    secret = "supersecret"
+
+    def fake_run(*args, **kwargs):
+        raise CalledProcessError(1, args[0], output="", stderr=f"bad {secret} msg")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    backend = KeychainBackend()
+    ref = SecretRef(scheme="kc", service="svc", account="acct")
+
+    with pytest.raises(EnvrcctlError) as exc:
+        backend.set(ref, secret)
+
+    assert secret not in str(exc.value)
+    assert "[REDACTED]" in str(exc.value)

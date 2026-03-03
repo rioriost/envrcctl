@@ -46,6 +46,25 @@ def test_secretservice_error_falls_back_to_stdout(monkeypatch) -> None:
     assert "oops" in str(exc.value)
 
 
+def test_secretservice_error_redacts_input(monkeypatch) -> None:
+    secret = "supersecret"
+
+    def fake_run(*args, **kwargs):
+        raise CalledProcessError(1, args[0], output="", stderr=f"boom {secret}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    backend = SecretServiceBackend()
+    ref = SecretRef(scheme="ss", service="svc", account="acct")
+
+    with pytest.raises(EnvrcctlError) as exc:
+        backend.set(ref, secret)
+
+    message = str(exc.value)
+    assert secret not in message
+    assert "[REDACTED]" in message
+
+
 def test_secretservice_commands(monkeypatch) -> None:
     calls = []
 

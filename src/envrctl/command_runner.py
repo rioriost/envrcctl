@@ -26,6 +26,24 @@ def _validate_command_args(
     return validated
 
 
+def _collect_redactions(input_text: str | None) -> list[str]:
+    redactions: list[str] = []
+    if input_text:
+        redactions.append(input_text)
+        stripped = input_text.strip()
+        if stripped and stripped not in redactions:
+            redactions.append(stripped)
+    return redactions
+
+
+def _redact_message(message: str, redactions: Sequence[str]) -> str:
+    redacted = message
+    for token in redactions:
+        if token:
+            redacted = redacted.replace(token, "[REDACTED]")
+    return redacted
+
+
 def run_command(
     args: Sequence[str],
     input_text: str | None = None,
@@ -43,5 +61,6 @@ def run_command(
         )
     except subprocess.CalledProcessError as exc:
         message = exc.stderr.strip() or exc.stdout.strip() or error_message
+        message = _redact_message(message, _collect_redactions(input_text))
         raise EnvrcctlError(message) from exc
     return result.stdout
