@@ -184,7 +184,7 @@ uv run python scripts/generate_completions.py
 - Secrets are never written to `.envrc`
 - Secrets are never passed in CLI arguments
 - `.envrc` updates are atomic
-- The tool warns on world-writable `.envrc`
+- The tool refuses to write to world-writable `.envrc`
 
 ## Development
 

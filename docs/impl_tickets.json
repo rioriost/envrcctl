@@ -311,11 +311,14 @@
         {
           "id": "p5-06",
           "title": "Enforce world-writable .envrc policy",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Current permission checks"],
           "outputs": [
             "Stricter handling for world-writable files",
-            "Documented behavior and tests"
+            "Documented behavior and tests",
+            "tests/test_cli.py",
+            "README.md",
+            "README.jp.md"
           ]
         },
         {

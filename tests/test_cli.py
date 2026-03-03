@@ -222,10 +222,12 @@ def test_init_warns_when_world_writable(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
-    monkeypatch.setattr(cli, "write_envrc", lambda *args, **kwargs: True)
+    envrc_path = tmp_path / ENVRC_FILENAME
+    envrc_path.write_text("# placeholder\n", encoding="utf-8")
+    envrc_path.chmod(0o666)
 
     result = runner.invoke(cli.app, ["init"])
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert "world-writable" in result.stderr
 
 

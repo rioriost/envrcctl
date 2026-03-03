@@ -61,14 +61,21 @@ def _validate_env_var(name: str) -> None:
         raise EnvrcctlError(f"Invalid environment variable name: {name}")
 
 
-def _warn_if_world_writable() -> None:
-    typer.echo("WARN: .envrc is world-writable.", err=True)
+def _ensure_not_world_writable(path: Path) -> None:
+    if path.exists() and is_world_writable(path):
+        raise EnvrcctlError(
+            ".envrc is world-writable; refusing to write. Fix permissions and retry."
+        )
 
 
 def _write_envrc(doc, block: ManagedBlock) -> None:
-    warn = write_envrc(_envrc_path(), doc, block)
+    path = _envrc_path()
+    _ensure_not_world_writable(path)
+    warn = write_envrc(path, doc, block)
     if warn:
-        _warn_if_world_writable()
+        raise EnvrcctlError(
+            ".envrc is world-writable after write. Fix permissions and retry."
+        )
 
 
 @app.command()
