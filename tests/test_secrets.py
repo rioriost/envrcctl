@@ -10,6 +10,9 @@ def test_parse_ref_valid_and_invalid() -> None:
     assert ref.service == "svc"
     assert ref.account == "acct"
 
+    ref = secrets.parse_ref("kc:svc:openai:prod")
+    assert ref.account == "openai:prod"
+
     with pytest.raises(EnvrcctlError):
         secrets.parse_ref("invalid")
 
@@ -18,6 +21,15 @@ def test_parse_ref_valid_and_invalid() -> None:
 
     with pytest.raises(EnvrcctlError):
         secrets.parse_ref("kc::acct")
+
+    with pytest.raises(EnvrcctlError):
+        secrets.parse_ref("kc:bad service:acct")
+
+    with pytest.raises(EnvrcctlError):
+        secrets.parse_ref("kc:svc:bad acct")
+
+    with pytest.raises(EnvrcctlError):
+        secrets.parse_ref("kc:svc:bad/act")
 
 
 def test_format_ref_scheme_validation() -> None:
@@ -94,6 +106,13 @@ def test_format_ref_requires_service_and_account() -> None:
         secrets.format_ref("", "acct")
     with pytest.raises(EnvrcctlError):
         secrets.format_ref("svc", "")
+
+    with pytest.raises(EnvrcctlError):
+        secrets.format_ref("bad service", "acct")
+    with pytest.raises(EnvrcctlError):
+        secrets.format_ref("svc", "bad acct")
+    with pytest.raises(EnvrcctlError):
+        secrets.format_ref("svc", "bad/act")
 
 
 def test_backend_for_scheme_kc_requires_darwin(monkeypatch) -> None:

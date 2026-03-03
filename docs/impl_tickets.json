@@ -348,11 +348,13 @@
         {
           "id": "p5-09",
           "title": "Stricter secret ref validation",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Ref schema and parsing"],
           "outputs": [
             "Validation of schemes and allowed characters",
-            "Clear error messaging for invalid refs"
+            "Clear error messaging for invalid refs",
+            "src/envrctl/secrets.py",
+            "tests/test_secrets.py"
           ]
         },
         {
