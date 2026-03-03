@@ -62,6 +62,18 @@ def test_cli_init_set_get_list_unset(tmp_path: Path, monkeypatch) -> None:
     assert 'eval "$(envrcctl inject)"' in envrc_text
 
 
+def test_cli_set_adds_inject_line_when_requested(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    runner.invoke(cli.app, ["init"])
+    result = runner.invoke(cli.app, ["set", "FOO", "bar", "--inject"])
+    assert result.exit_code == 0
+
+    envrc_text = _read_envrc(tmp_path / ENVRC_FILENAME)
+    assert 'eval "$(envrcctl inject)"' in envrc_text
+
+
 def test_cli_inherit_on_off(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
@@ -88,12 +100,21 @@ def test_cli_secret_set_inject_unset(tmp_path: Path, monkeypatch) -> None:
 
     result = runner.invoke(
         cli.app,
-        ["secret", "set", "OPENAI_API_KEY", "--account", "openai:prod", "--stdin"],
+        [
+            "secret",
+            "set",
+            "OPENAI_API_KEY",
+            "--account",
+            "openai:prod",
+            "--stdin",
+            "--inject",
+        ],
         input="secretvalue",
     )
     assert result.exit_code == 0
     envrc_text = _read_envrc(tmp_path / ENVRC_FILENAME)
     assert "ENVRCCTL_SECRET_OPENAI_API_KEY" in envrc_text
+    assert 'eval "$(envrcctl inject)"' in envrc_text
 
     result = runner.invoke(cli.app, ["inject", "--force"])
     assert result.exit_code == 0
@@ -542,6 +563,27 @@ def test_cli_migrate_moves_unmanaged_exports(tmp_path: Path, monkeypatch) -> Non
     envrc_text = _read_envrc(tmp_path / ENVRC_FILENAME)
     assert "export OUTSIDE=1" in envrc_text
     assert "ENVRCCTL_SECRET_API_KEY" in envrc_text
+
+
+def test_cli_migrate_adds_inject_line_when_requested(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    content = "\n".join(
+        [
+            "export OUTSIDE=1",
+            "export ENVRCCTL_SECRET_API_KEY=kc:svc:acct",
+        ]
+    )
+    (tmp_path / ENVRC_FILENAME).write_text(content, encoding="utf-8")
+
+    result = runner.invoke(cli.app, ["migrate", "--yes", "--inject"])
+    assert result.exit_code == 0
+
+    envrc_text = _read_envrc(tmp_path / ENVRC_FILENAME)
+    assert 'eval "$(envrcctl inject)"' in envrc_text
 
 
 def test_find_nearest_envrc_dir_returns_none(tmp_path: Path) -> None:
