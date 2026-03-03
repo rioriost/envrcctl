@@ -248,11 +248,15 @@ This plan expands `docs/draft.md` into concrete, phased execution steps. Each ph
 - TTY guard for `inject` (and any future plaintext secret outputs)
 - Safe defaults with explicit override flags for non-interactive use
 - Compatibility plan for direnv users (retain `inject` with guard)
+- Runtime/admin separation in secret refs (exec injects runtime only)
+- `secret get` command with TTY guard and clipboard-only mode
 - Documentation and tests for new flows and safety checks
 
 ### Deliverables
 - `envrcctl exec -- <command>` with filtered secret injection
 - Non-interactive blocking behavior for `inject` (with `--force` override)
+- Runtime/admin secret ref schema and exec injection limited to runtime
+- `envrcctl secret get` with TTY guard and clipboard-only mode
 - Clear UX messaging for blocked plaintext output
 - Unit and CLI tests for exec + TTY guard behaviors
 - Updated docs describing recommended safe workflow
@@ -265,19 +269,31 @@ This plan expands `docs/draft.md` into concrete, phased execution steps. Each ph
    - Build env map from managed block exports + resolved secret refs
    - Run child process with injected env (no stdout emission of secrets)
    - Preserve exit code and stderr behavior
-3. **TTY guard for plaintext output**
+3. **Runtime/admin separation**
+   - Extend secret ref schema to carry kind (runtime/admin)
+   - Default new secrets to runtime; keep admin opt-in
+   - Limit `exec` injection to runtime refs
+4. **TTY guard for plaintext output**
    - Block `inject` in non-interactive environments
    - Add `--force` to bypass with explicit acknowledgement
-4. **Tests**
+5. **Secret get (clipboard-only)**
+   - Implement `secret get` with masked display
+   - Copy to clipboard by default; block in non-interactive mode
+   - Add explicit override flags for plaintext output (guarded)
+6. **Tests**
    - Unit tests for TTY checks and behavior switching
    - CLI tests for exec env injection and exit codes
-5. **Documentation**
+   - Tests for runtime/admin filtering and secret get behavior
+7. **Documentation**
    - Recommend `exec` as the safest workflow
    - Explain `inject` restrictions and overrides
+   - Document runtime/admin separation and `secret get` safety model
 
 ### Exit Criteria
 - `exec` works end-to-end without plaintext secret output
 - `inject` is blocked in non-interactive sessions unless forced
+- Runtime/admin refs are supported and exec injects runtime only
+- `secret get` is clipboard-only by default and TTY-guarded
 - Tests cover both interactive and non-interactive paths
 - Docs clearly explain the new safe default behavior
 

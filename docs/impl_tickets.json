@@ -455,6 +455,32 @@
             "README updates with exec as recommended flow",
             "Inject restrictions and override guidance"
           ]
+        },
+        {
+          "id": "p6-06",
+          "title": "Runtime/admin separation for secret refs",
+          "status": "planned",
+          "inputs": ["Secret ref schema", "Exec injection rules"],
+          "outputs": [
+            "Ref schema extended with runtime/admin kind",
+            "Exec injection filtered to runtime secrets only",
+            "Notes for migration or defaults"
+          ]
+        },
+        {
+          "id": "p6-07",
+          "title": "Secret get command with TTY guard and clipboard mode",
+          "status": "planned",
+          "inputs": [
+            "Secret backend access",
+            "TTY detection strategy",
+            "Clipboard integration"
+          ],
+          "outputs": [
+            "secret get command with masked output",
+            "Clipboard-only default behavior",
+            "Plaintext output gated by explicit override flags"
+          ]
         }
       ]
     }
