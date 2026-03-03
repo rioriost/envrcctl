@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Optional
 
 from .managed_block import (
+    SECRET_ENV_PREFIX,
     ManagedBlock,
+    parse_export_line,
     parse_managed_block,
     render_managed_block,
     split_envrc,
@@ -38,6 +40,29 @@ def ensure_managed_block(doc: EnvrcDocument) -> ManagedBlock:
     if doc.managed is None:
         return ManagedBlock()
     return doc.managed
+
+
+def extract_unmanaged_exports(
+    text: str,
+) -> tuple[str, dict[str, str], dict[str, str]]:
+    lines = text.splitlines()
+    kept: list[str] = []
+    exports: dict[str, str] = {}
+    secret_refs: dict[str, str] = {}
+    for line in lines:
+        parsed = parse_export_line(line)
+        if parsed is None:
+            kept.append(line)
+            continue
+        var, value = parsed
+        if var.startswith(SECRET_ENV_PREFIX):
+            secret_var = var[len(SECRET_ENV_PREFIX) :]
+            if secret_var:
+                secret_refs[secret_var] = value
+            continue
+        exports[var] = value
+    cleaned = "\n".join(kept).rstrip()
+    return cleaned, exports, secret_refs
 
 
 def render_envrc(doc: EnvrcDocument, managed: ManagedBlock) -> str:

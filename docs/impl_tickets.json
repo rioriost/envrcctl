@@ -113,12 +113,12 @@
       "id": "phase-2",
       "name": "Phase 2 — Diagnostics & Quality of Life",
       "goal": "Eval/doctor/migrate commands and shell completions.",
-      "status": "planned",
+      "status": "in-progress",
       "tasks": [
         {
           "id": "p2-01",
           "title": "Eval command (masked view)",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Managed block model", "Inheritance rules"],
           "outputs": [
             "eval shows effective env with masked secrets and source attribution"
@@ -127,7 +127,7 @@
         {
           "id": "p2-02",
           "title": "Doctor command (security checks)",
-          "status": "planned",
+          "status": "done",
           "inputs": [".envrc parser", "Permissions inspection"],
           "outputs": [
             "doctor warnings for insecure permissions and missing inject line"
@@ -136,7 +136,7 @@
         {
           "id": "p2-03",
           "title": "Migration helper",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Existing .envrc contents"],
           "outputs": ["migrate moves exports into managed block safely"]
         },

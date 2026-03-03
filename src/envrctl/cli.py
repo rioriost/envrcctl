@@ -9,7 +9,14 @@ from typing import Callable
 
 import typer
 
-from .envrc import ENVRC_FILENAME, ensure_managed_block, load_envrc, write_envrc
+from .envrc import (
+    ENVRC_FILENAME,
+    ensure_managed_block,
+    extract_unmanaged_exports,
+    is_world_writable,
+    load_envrc,
+    write_envrc,
+)
 from .errors import EnvrcctlError
 from .managed_block import ManagedBlock
 from .secrets import DEFAULT_SERVICE, format_ref, get_default_backend, parse_ref
@@ -23,6 +30,16 @@ ENV_VAR_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 def _envrc_path() -> Path:
     return Path.cwd() / ENVRC_FILENAME
+
+
+def _find_nearest_envrc_dir(start_dir: Path) -> Path | None:
+    current = start_dir
+    while True:
+        if (current / ENVRC_FILENAME).exists():
+            return current
+        if current.parent == current:
+            return None
+        current = current.parent
 
 
 def _run(action: Callable[[], None]) -> None:
@@ -212,5 +229,119 @@ def inject() -> None:
             ref = parse_ref(block.secret_refs[key])
             value = backend.get(ref)
             typer.echo(f"export {key}={shlex.quote(value)}")
+
+    _run(action)
+
+
+@app.command()
+def eval() -> None:
+    """Show the effective environment (masked secrets)."""
+
+    def action() -> None:
+        cwd = Path.cwd()
+        doc = load_envrc(_envrc_path())
+        if not doc.has_block:
+            raise EnvrcctlError("Managed block not found in .envrc.")
+        block = ensure_managed_block(doc)
+
+        chain: list[tuple[Path, ManagedBlock]] = [(cwd, block)]
+        inherit = block.inherit
+        search_dir = cwd.parent
+        while inherit:
+            parent_dir = _find_nearest_envrc_dir(search_dir)
+            if parent_dir is None:
+                break
+            parent_doc = load_envrc(parent_dir / ENVRC_FILENAME)
+            if parent_doc.managed is None:
+                break
+            parent_block = ensure_managed_block(parent_doc)
+            chain.append((parent_dir, parent_block))
+            inherit = parent_block.inherit
+            search_dir = parent_dir.parent
+
+        merged: dict[str, tuple[str, str, bool]] = {}
+        for path, block in reversed(chain):
+            source = "current" if path == cwd else str(path)
+            for key, value in block.exports.items():
+                merged[key] = (value, source, False)
+            for key, ref in block.secret_refs.items():
+                merged[key] = (ref, source, True)
+
+        for key in sorted(merged.keys()):
+            value, source, is_secret = merged[key]
+            display = "******" if is_secret else value
+            kind = "secret" if is_secret else "export"
+            typer.echo(f"{key} = {display} (from {source}, {kind})")
+
+    _run(action)
+
+
+@app.command()
+def doctor() -> None:
+    """Run security and consistency checks for .envrc."""
+
+    def action() -> None:
+        warnings = 0
+        path = _envrc_path()
+        if not path.exists():
+            raise EnvrcctlError(".envrc not found.")
+        if is_world_writable(path):
+            typer.echo("WARN: .envrc is world-writable.", err=True)
+            warnings += 1
+
+        doc = load_envrc(path)
+        if not doc.has_block:
+            typer.echo("WARN: Managed block not found in .envrc.", err=True)
+            warnings += 1
+        elif doc.managed and not doc.managed.include_inject:
+            typer.echo("WARN: inject line missing in managed block.", err=True)
+            warnings += 1
+
+        before_clean, before_exports, before_secrets = extract_unmanaged_exports(
+            doc.before
+        )
+        after_clean, after_exports, after_secrets = extract_unmanaged_exports(doc.after)
+        unmanaged = {**before_exports, **after_exports}
+        unmanaged_secrets = {**before_secrets, **after_secrets}
+        if unmanaged:
+            keys = ", ".join(sorted(unmanaged.keys()))
+            typer.echo(f"WARN: unmanaged exports outside block: {keys}", err=True)
+            warnings += 1
+        if unmanaged_secrets:
+            keys = ", ".join(sorted(unmanaged_secrets.keys()))
+            typer.echo(f"WARN: unmanaged secret refs outside block: {keys}", err=True)
+            warnings += 1
+
+        if warnings == 0:
+            typer.echo("OK")
+
+    _run(action)
+
+
+@app.command()
+def migrate() -> None:
+    """Move unmanaged exports into the managed block."""
+
+    def action() -> None:
+        path = _envrc_path()
+        if not path.exists():
+            raise EnvrcctlError(".envrc not found.")
+        doc = load_envrc(path)
+        block = ensure_managed_block(doc)
+
+        before_clean, before_exports, before_secrets = extract_unmanaged_exports(
+            doc.before
+        )
+        after_clean, after_exports, after_secrets = extract_unmanaged_exports(doc.after)
+
+        for key, value in {**before_exports, **after_exports}.items():
+            block.exports.setdefault(key, value)
+        for key, ref in {**before_secrets, **after_secrets}.items():
+            block.secret_refs.setdefault(key, ref)
+
+        doc.before = before_clean
+        doc.after = after_clean
+        block.include_inject = True
+        _write_envrc(doc, block)
 
     _run(action)

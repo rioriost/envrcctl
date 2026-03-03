@@ -14,6 +14,14 @@ SECRET_ENV_PREFIX = "ENVRCCTL_SECRET_"
 EXPORT_RE = re.compile(r"^export\s+([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 
 
+def parse_export_line(line: str) -> tuple[str, str] | None:
+    match = EXPORT_RE.match(line.strip())
+    if not match:
+        return None
+    var, value = match.group(1), match.group(2).strip()
+    return var, _unquote_value(value)
+
+
 @dataclass
 class ManagedBlock:
     inherit: bool = False
