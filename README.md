@@ -178,6 +178,34 @@ Secrets masked by default:
 
     envrcctl secret list
 
+## Usage (Phase 2)
+
+1. View the effective environment (secrets masked):
+
+    envrcctl eval
+
+2. Run diagnostics:
+
+    envrcctl doctor
+
+3. Migrate unmanaged exports into the managed block:
+
+    envrcctl migrate
+
+## Shell Completion
+
+Typer provides built-in completion options:
+
+    envrcctl --install-completion
+    envrcctl --show-completion bash
+    envrcctl --show-completion zsh
+    envrcctl --show-completion fish
+
+Pre-generated scripts live in the `completions/` directory.
+To refresh them, run:
+
+    uv run python scripts/generate_completions.py
+
 ## Security Principles
 
 - No secrets in CLI arguments

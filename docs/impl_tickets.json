@@ -113,7 +113,7 @@
       "id": "phase-2",
       "name": "Phase 2 — Diagnostics & Quality of Life",
       "goal": "Eval/doctor/migrate commands and shell completions.",
-      "status": "in-progress",
+      "status": "done",
       "tasks": [
         {
           "id": "p2-01",
@@ -143,14 +143,14 @@
         {
           "id": "p2-04",
           "title": "Shell completions",
-          "status": "planned",
+          "status": "done",
           "inputs": ["CLI command tree"],
           "outputs": ["Completion scripts and install instructions"]
         },
         {
           "id": "p2-05",
           "title": "Phase 2 docs",
-          "status": "planned",
+          "status": "done",
           "inputs": ["New commands behavior"],
           "outputs": [
             "Updated docs and examples for eval/doctor/migrate/completions"

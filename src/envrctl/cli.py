@@ -21,7 +21,7 @@ from .errors import EnvrcctlError
 from .managed_block import ManagedBlock
 from .secrets import DEFAULT_SERVICE, format_ref, get_default_backend, parse_ref
 
-app = typer.Typer(add_completion=False, help="Manage .envrc with managed blocks.")
+app = typer.Typer(add_completion=True, help="Manage .envrc with managed blocks.")
 secret_app = typer.Typer(help="Manage secret references.")
 app.add_typer(secret_app, name="secret")
 

@@ -184,6 +184,35 @@ eval "$(envrcctl inject)"
 envrcctl secret list
 ```
 
+## 使い方（Phase 2）
+
+1. 有効な環境の表示（シークレットはマスク）
+```
+envrcctl eval
+```
+
+2. セキュリティ/整合性チェック
+```
+envrcctl doctor
+```
+
+3. 未管理の export/secret ref を管理ブロックに移行
+```
+envrcctl migrate
+```
+
+4. シェル補完の有効化
+```
+envrcctl --install-completion
+```
+
+補完スクリプトを明示的に生成する場合:
+```
+envrcctl --show-completion bash > completions/envrcctl.bash
+```
+
+リポジトリには `scripts/generate_completions.py` と `completions/` を用意してあります。
+
 ## セキュリティ原則
 
 - CLI 引数にシークレットを渡さない
