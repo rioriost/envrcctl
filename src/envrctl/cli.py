@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import getpass
+import os
 import re
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 from typing import Callable
@@ -58,6 +60,10 @@ def _run(action: Callable[[], None]) -> None:
     except EnvrcctlError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
+
+
+def _is_interactive() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
 
 
 def _validate_env_var(name: str) -> None:
@@ -247,10 +253,18 @@ def secret_list() -> None:
 
 
 @app.command()
-def inject() -> None:
+def inject(
+    force: bool = typer.Option(
+        False, "--force", help="Allow inject in non-interactive environments."
+    ),
+) -> None:
     """Emit export statements for all secret references."""
 
     def action() -> None:
+        if not _is_interactive() and not force:
+            raise EnvrcctlError(
+                "inject is blocked in non-interactive environments. Use --force to override."
+            )
         doc = load_envrc(_envrc_path())
         block = ensure_managed_block(doc)
         for key in sorted(block.secret_refs.keys()):
@@ -258,6 +272,53 @@ def inject() -> None:
             backend = backend_for_ref(ref)
             value = backend.get(ref)
             typer.echo(f"export {key}={shlex.quote(value)}")
+
+    _run(action)
+
+
+@app.command(
+    "exec",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def exec_cmd(
+    ctx: typer.Context,
+    key: list[str] = typer.Option(
+        None,
+        "-k",
+        "--key",
+        help="Limit injected secrets to specific variables.",
+    ),
+) -> None:
+    """Execute a command with managed secrets injected into the environment."""
+
+    def action() -> None:
+        if not ctx.args:
+            raise EnvrcctlError("No command provided. Use -- to separate the command.")
+        doc = load_envrc(_envrc_path())
+        block = ensure_managed_block(doc)
+
+        selected_keys = set(key) if key else None
+        if selected_keys is not None:
+            missing = selected_keys - set(block.secret_refs.keys())
+            if missing:
+                missing_list = ", ".join(sorted(missing))
+                raise EnvrcctlError(
+                    f"Secrets not found in managed block: {missing_list}"
+                )
+
+        env = os.environ.copy()
+        for name, value in block.exports.items():
+            env[name] = value
+        for name in sorted(block.secret_refs.keys()):
+            if selected_keys is not None and name not in selected_keys:
+                continue
+            ref = parse_ref(block.secret_refs[name])
+            backend = backend_for_ref(ref)
+            env[name] = backend.get(ref)
+
+        result = subprocess.run(list(ctx.args), env=env)
+        if result.returncode != 0:
+            raise typer.Exit(code=result.returncode)
 
     _run(action)
 

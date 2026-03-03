@@ -51,6 +51,15 @@ def test_secret_set_rejects_empty_value(tmp_path: Path, monkeypatch) -> None:
     assert "Secret value is empty" in result.stderr
 
 
+def test_inject_blocked_in_non_interactive(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    result = runner.invoke(cli.app, ["inject"])
+    assert result.exit_code == 1
+    assert "inject is blocked in non-interactive environments" in result.stderr
+
+
 def test_eval_requires_managed_block(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()

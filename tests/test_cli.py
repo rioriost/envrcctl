@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Dict
 
@@ -93,7 +94,7 @@ def test_cli_secret_set_inject_unset(tmp_path: Path, monkeypatch) -> None:
     envrc_text = _read_envrc(tmp_path / ENVRC_FILENAME)
     assert "ENVRCCTL_SECRET_OPENAI_API_KEY" in envrc_text
 
-    result = runner.invoke(cli.app, ["inject"])
+    result = runner.invoke(cli.app, ["inject", "--force"])
     assert result.exit_code == 0
     assert "export OPENAI_API_KEY=secretvalue" in result.stdout
 
@@ -101,6 +102,46 @@ def test_cli_secret_set_inject_unset(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0
     envrc_text = _read_envrc(tmp_path / ENVRC_FILENAME)
     assert "ENVRCCTL_SECRET_OPENAI_API_KEY" not in envrc_text
+
+
+def test_cli_exec_injects_secrets_into_child(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    dummy = DummyBackend()
+
+    monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
+    monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
+
+    runner.invoke(cli.app, ["init"])
+    runner.invoke(
+        cli.app,
+        ["secret", "set", "TOKEN", "--account", "acct", "--stdin"],
+        input="secretvalue",
+    )
+
+    script = "import os, sys; sys.exit(0 if os.getenv('TOKEN') == 'secretvalue' else 1)"
+    result = runner.invoke(cli.app, ["exec", "--", sys.executable, "-c", script])
+    assert result.exit_code == 0
+
+
+def test_cli_inject_requires_tty(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    dummy = DummyBackend()
+
+    monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
+    monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
+
+    runner.invoke(cli.app, ["init"])
+    runner.invoke(
+        cli.app,
+        ["secret", "set", "TOKEN", "--account", "acct", "--stdin"],
+        input="secretvalue",
+    )
+
+    result = runner.invoke(cli.app, ["inject"])
+    assert result.exit_code == 1
+    assert "inject is blocked" in result.stderr
 
 
 def test_cli_outputs_do_not_leak_secret_except_inject(
@@ -135,7 +176,7 @@ def test_cli_outputs_do_not_leak_secret_except_inject(
         assert secret not in result.stdout
         assert secret not in result.stderr
 
-    result = runner.invoke(cli.app, ["inject"])
+    result = runner.invoke(cli.app, ["inject", "--force"])
     assert result.exit_code == 0
     assert f"export TOKEN={secret}" in result.stdout
 
