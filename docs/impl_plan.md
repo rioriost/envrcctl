@@ -239,6 +239,48 @@ This plan expands `docs/draft.md` into concrete, phased execution steps. Each ph
 
 ---
 
+## Phase 6 — Exec Mode & TTY Guard
+
+**Goal:** Add a safe-by-default execution path that injects secrets without stdout output, and gate plaintext secret emission in non-interactive environments.
+
+### Scope
+- New `exec` command that injects secrets into a child process environment
+- TTY guard for `inject` (and any future plaintext secret outputs)
+- Safe defaults with explicit override flags for non-interactive use
+- Compatibility plan for direnv users (retain `inject` with guard)
+- Documentation and tests for new flows and safety checks
+
+### Deliverables
+- `envrcctl exec -- <command>` with filtered secret injection
+- Non-interactive blocking behavior for `inject` (with `--force` override)
+- Clear UX messaging for blocked plaintext output
+- Unit and CLI tests for exec + TTY guard behaviors
+- Updated docs describing recommended safe workflow
+
+### Implementation Steps
+1. **CLI design and routing**
+   - Define `exec` command signature (`--` passthrough)
+   - Add optional `-k/--key` filtering and `--all` default
+2. **Exec runner**
+   - Build env map from managed block exports + resolved secret refs
+   - Run child process with injected env (no stdout emission of secrets)
+   - Preserve exit code and stderr behavior
+3. **TTY guard for plaintext output**
+   - Block `inject` in non-interactive environments
+   - Add `--force` to bypass with explicit acknowledgement
+4. **Tests**
+   - Unit tests for TTY checks and behavior switching
+   - CLI tests for exec env injection and exit codes
+5. **Documentation**
+   - Recommend `exec` as the safest workflow
+   - Explain `inject` restrictions and overrides
+
+### Exit Criteria
+- `exec` works end-to-end without plaintext secret output
+- `inject` is blocked in non-interactive sessions unless forced
+- Tests cover both interactive and non-interactive paths
+- Docs clearly explain the new safe default behavior
+
 ## Cross-Cutting Considerations
 
 ### Project Management

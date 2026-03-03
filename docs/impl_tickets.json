@@ -398,6 +398,65 @@
           ]
         }
       ]
+    },
+    {
+      "id": "phase-6",
+      "name": "Phase 6 — Exec Mode & TTY Guard",
+      "goal": "Add exec-based secret injection without stdout and block plaintext output in non-interactive runs.",
+      "status": "planned",
+      "tasks": [
+        {
+          "id": "p6-01",
+          "title": "Exec command CLI design",
+          "status": "planned",
+          "inputs": ["Existing CLI command tree", "Inject workflow behavior"],
+          "outputs": [
+            "exec command signature with -- passthrough",
+            "Key filtering options (-k/--key) and default behavior"
+          ]
+        },
+        {
+          "id": "p6-02",
+          "title": "Exec runner implementation",
+          "status": "planned",
+          "inputs": ["Managed block model", "Secret backend resolution"],
+          "outputs": [
+            "Child-process env injection without stdout secret emission",
+            "Exit code and stderr passthrough behavior"
+          ]
+        },
+        {
+          "id": "p6-03",
+          "title": "TTY guard for plaintext secret output",
+          "status": "planned",
+          "inputs": ["inject behavior", "TTY detection strategy"],
+          "outputs": [
+            "Non-interactive blocking for inject",
+            "Explicit --force override flag",
+            "User-facing error messaging"
+          ]
+        },
+        {
+          "id": "p6-04",
+          "title": "Exec + TTY guard tests",
+          "status": "planned",
+          "inputs": ["CLI test harness", "TTY behavior controls"],
+          "outputs": [
+            "Unit tests for TTY guard behavior",
+            "CLI tests for exec env injection and exit codes"
+          ]
+        },
+        {
+          "id": "p6-05",
+          "title": "Docs updates for exec and inject safety",
+          "status": "planned",
+          "inputs": ["New exec/TTY guard behavior"],
+          "outputs": [
+            "README updates with exec as recommended flow",
+            "Inject restrictions and override guidance"
+          ]
+        }
+      ]
     }
   ]
 }
