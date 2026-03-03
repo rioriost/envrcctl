@@ -9,7 +9,8 @@ BEGIN_MARKER = "# >>> envrcctl:begin"
 END_MARKER = "# <<< envrcctl:end"
 MANAGED_HEADER = "# managed: true"
 INJECT_LINE = 'eval "$(envrcctl inject)"'
-SECRET_ENV_PREFIX = "ENVRCCTL_SECRET_"
+# Prefix label for secret environment variables.
+SECRET_ENV_PREFIX = "ENVRCCTL_SECRET_"  # nosec B105
 
 EXPORT_RE = re.compile(r"^export\s+([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 
