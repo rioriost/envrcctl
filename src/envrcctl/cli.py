@@ -138,6 +138,9 @@ def _write_envrc(doc, block: ManagedBlock) -> None:
 @app.command()
 def init(
     yes: bool = typer.Option(False, "--yes", help="Confirm modifying existing .envrc."),
+    inject: bool = typer.Option(
+        False, "--inject", help="Add inject line to managed block."
+    ),
 ) -> None:
     """Create .envrc if missing and insert managed block."""
 
@@ -148,7 +151,8 @@ def init(
             _confirm_or_abort(".envrc exists; proceed with managed block update?", yes)
         doc = load_envrc(path)
         block = ensure_managed_block(doc)
-        block.include_inject = True
+        if inject:
+            block.include_inject = True
         _write_envrc(doc, block)
 
     _run(action)
@@ -170,7 +174,13 @@ def inherit(state: str = typer.Argument(..., help="on/off")) -> None:
 
 
 @app.command()
-def set(var: str, value: str) -> None:
+def set(
+    var: str,
+    value: str,
+    inject: bool = typer.Option(
+        False, "--inject", help="Add inject line to managed block."
+    ),
+) -> None:
     """Set a non-secret export in the managed block."""
 
     def action() -> None:
@@ -178,7 +188,8 @@ def set(var: str, value: str) -> None:
         doc = load_envrc(_envrc_path())
         block = ensure_managed_block(doc)
         block.exports[var] = value
-        block.include_inject = True
+        if inject:
+            block.include_inject = True
         _write_envrc(doc, block)
 
     _run(action)
@@ -236,6 +247,9 @@ def secret_set(
     ),
     kind: str = typer.Option("runtime", "--kind", help="Secret kind (runtime/admin)."),
     stdin: bool = typer.Option(False, "--stdin", help="Read secret from stdin."),
+    inject: bool = typer.Option(
+        False, "--inject", help="Add inject line to managed block."
+    ),
 ) -> None:
     """Store a secret and add its reference to the managed block."""
 
@@ -255,7 +269,8 @@ def secret_set(
         doc = load_envrc(_envrc_path())
         block = ensure_managed_block(doc)
         block.secret_refs[var] = ref
-        block.include_inject = True
+        if inject:
+            block.include_inject = True
         _write_envrc(doc, block)
 
     _run(action)
@@ -496,7 +511,7 @@ def doctor() -> None:
             warnings += 1
         elif doc.managed and not doc.managed.include_inject:
             typer.echo(
-                "WARN: inject line missing in managed block. Run `envrcctl init` to add it.",
+                "WARN: inject line missing in managed block. Run `envrcctl init --inject` to add it.",
                 err=True,
             )
             warnings += 1
@@ -547,6 +562,9 @@ def migrate(
     yes: bool = typer.Option(
         False, "--yes", help="Confirm migrating unmanaged exports."
     ),
+    inject: bool = typer.Option(
+        False, "--inject", help="Add inject line to managed block."
+    ),
 ) -> None:
     """Move unmanaged exports into the managed block."""
 
@@ -572,7 +590,8 @@ def migrate(
 
         doc.before = before_clean
         doc.after = after_clean
-        block.include_inject = True
+        if inject:
+            block.include_inject = True
         _write_envrc(doc, block)
 
     _run(action)

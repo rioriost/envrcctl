@@ -69,7 +69,7 @@ direnvのインストールは以下です。
     envrcctl init
 ```
 
-既存の `.envrc` がある場合は確認が求められます。非対話実行では `--yes` でスキップできます。
+既存の `.envrc` がある場合は確認が求められます。非対話実行では `--yes` でスキップできます。`--inject` で inject 行を明示的に追加できます。
 
 2. シークレット以外を追加:
 
@@ -91,11 +91,13 @@ direnvのインストールは以下です。
     envrcctl secret set OPENAI_API_KEY --account openai:prod
 ```
 
-5. `.envrc` に inject を追加（`init` が付与）:
+5. inject 行を明示的に追加:
 
 ```sh
-    eval "$(envrcctl inject)"
+    envrcctl init --inject
 ```
+
+管理ブロックに `eval "$(envrcctl inject)"` が追加されます。
 
 6. direnv を許可:
 

@@ -37,7 +37,7 @@ def test_cli_init_set_get_list_unset(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
-    result = runner.invoke(cli.app, ["init"])
+    result = runner.invoke(cli.app, ["init", "--inject"])
     assert result.exit_code == 0
 
     result = runner.invoke(cli.app, ["set", "FOO", "bar"])

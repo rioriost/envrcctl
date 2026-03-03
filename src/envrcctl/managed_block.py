@@ -28,7 +28,7 @@ class ManagedBlock:
     inherit: bool = False
     exports: Dict[str, str] = field(default_factory=dict)
     secret_refs: Dict[str, str] = field(default_factory=dict)
-    include_inject: bool = True
+    include_inject: bool = False
 
 
 def split_envrc(text: str) -> Tuple[str, List[str] | None, str, bool]:

@@ -72,7 +72,7 @@ uv run python -m envrcctl.main --help
 envrcctl init
 ```
 
-If `.envrc` already exists, you'll be prompted to confirm. Use `--yes` to skip the prompt in non-interactive runs.
+If `.envrc` already exists, you'll be prompted to confirm. Use `--yes` to skip the prompt in non-interactive runs. Add `--inject` to explicitly insert the inject line.
 
 2. Add non-secret variables:
 
@@ -94,11 +94,13 @@ envrcctl inherit on
 envrcctl secret set OPENAI_API_KEY --account openai:prod
 ```
 
-5. Ensure your `.envrc` includes:
+5. Add the inject line explicitly:
 
 ```sh
-eval "$(envrcctl inject)"
+envrcctl init --inject
 ```
+
+This inserts `eval "$(envrcctl inject)"` into the managed block.
 
 6. Allow direnv:
 

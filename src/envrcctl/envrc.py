@@ -39,7 +39,7 @@ def load_envrc(path: Path) -> EnvrcDocument:
 
 def ensure_managed_block(doc: EnvrcDocument) -> ManagedBlock:
     if doc.managed is None:
-        return ManagedBlock()
+        return ManagedBlock(include_inject=False)
     return doc.managed
 
 
