@@ -205,6 +205,41 @@ def test_cli_inject_requires_tty(tmp_path: Path, monkeypatch) -> None:
     assert "inject is blocked" in result.stderr
 
 
+def test_cli_inject_skips_admin_secrets(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    dummy = DummyBackend()
+
+    monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
+    monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
+
+    runner.invoke(cli.app, ["init"])
+    runner.invoke(
+        cli.app,
+        ["secret", "set", "RUNTIME_TOKEN", "--account", "runtime", "--stdin"],
+        input="runtimevalue",
+    )
+    runner.invoke(
+        cli.app,
+        [
+            "secret",
+            "set",
+            "ADMIN_TOKEN",
+            "--account",
+            "admin",
+            "--kind",
+            "admin",
+            "--stdin",
+        ],
+        input="adminvalue",
+    )
+
+    result = runner.invoke(cli.app, ["inject", "--force"])
+    assert result.exit_code == 0
+    assert "RUNTIME_TOKEN=runtimevalue" in result.stdout
+    assert "ADMIN_TOKEN" not in result.stdout
+
+
 def test_cli_secret_get_copies_masked(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
