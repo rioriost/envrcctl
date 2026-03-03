@@ -52,6 +52,12 @@ def format_ref(service: str, account: str, scheme: str = "kc") -> str:
 def resolve_backend(scheme: str | None = None) -> tuple[str, SecretBackend]:
     requested = (scheme or os.getenv("ENVRCCTL_BACKEND") or "").strip().lower()
     if requested:
+        if requested not in SUPPORTED_SCHEMES:
+            supported = ", ".join(SUPPORTED_SCHEMES)
+            raise EnvrcctlError(
+                f"Unsupported secret backend scheme: {requested}. "
+                f"Supported schemes: {supported}."
+            )
         return requested, _backend_for_scheme(requested)
 
     if sys.platform == "darwin":

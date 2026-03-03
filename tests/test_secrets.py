@@ -37,6 +37,18 @@ def test_resolve_backend_env_override(monkeypatch) -> None:
     assert backend is sentinel
 
 
+def test_resolve_backend_env_override_invalid(monkeypatch) -> None:
+    monkeypatch.setenv("ENVRCCTL_BACKEND", "nope")
+
+    with pytest.raises(EnvrcctlError):
+        secrets.resolve_backend()
+
+
+def test_resolve_backend_scheme_override_invalid() -> None:
+    with pytest.raises(EnvrcctlError):
+        secrets.resolve_backend("nope")
+
+
 def test_backend_for_ref_dispatch(monkeypatch) -> None:
     sentinel = object()
     monkeypatch.setattr(secrets, "_backend_for_scheme", lambda scheme: sentinel)

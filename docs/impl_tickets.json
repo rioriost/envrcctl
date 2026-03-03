@@ -336,11 +336,13 @@
         {
           "id": "p5-08",
           "title": "Fail-fast backend selection",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Backend selection logic"],
           "outputs": [
             "Explicit errors when backend is unavailable",
-            "No silent fallback behavior"
+            "No silent fallback behavior",
+            "src/envrctl/secrets.py",
+            "tests/test_secrets.py"
           ]
         },
         {
