@@ -198,26 +198,26 @@
       "id": "phase-4",
       "name": "Phase 4 — Test & Coverage Workflow",
       "goal": "Align dev dependencies, verify flow, and coverage target.",
-      "status": "planned",
+      "status": "in-progress",
       "tasks": [
         {
           "id": "p4-01",
           "title": "Move pytest/pytest-cov to dev-only dependencies",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Current pyproject.toml dependencies"],
           "outputs": ["pytest/pytest-cov marked as dev-only"]
         },
         {
           "id": "p4-02",
           "title": "Add Work loop-appropriate tests for verify",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Work loop verify requirement"],
           "outputs": ["Stable test set for verify runs"]
         },
         {
           "id": "p4-03",
           "title": "Add verify-release coverage script and tasks.json entry",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Coverage workflow requirements"],
           "outputs": [
             ".zed/scripts/verify-release",
@@ -227,11 +227,21 @@
         {
           "id": "p4-04",
           "title": "Enforce 90% coverage improvement loop",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Coverage target 90%"],
           "outputs": [
             "Coverage policy documented",
             "Loop to add tests until coverage >= 90%"
+          ]
+        },
+        {
+          "id": "p4-05",
+          "title": "Assess feasibility of 100% coverage",
+          "status": "planned",
+          "inputs": ["Current coverage report", "Uncovered lines list"],
+          "outputs": [
+            "Feasibility assessment for 100% coverage",
+            "List of remaining gaps and rationale if excluded"
           ]
         }
       ]

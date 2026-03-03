@@ -1,14 +1,6 @@
 [
-  {
-    "label": "verify",
-    "command": "./.zed/scripts/verify"
-  },
-  {
-    "label": "git status",
-    "command": "git status -sb"
-  },
-  {
-    "label": "git diff",
-    "command": "git diff"
-  }
+  { "label": "verify", "command": "./.zed/scripts/verify" },
+  { "label": "verify-release", "command": "./.zed/scripts/verify-release" },
+  { "label": "git status", "command": "git status -sb" },
+  { "label": "git diff", "command": "git diff" },
 ]

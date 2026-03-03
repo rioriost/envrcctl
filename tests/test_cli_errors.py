@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
+
+from envrctl import cli
+from envrctl.envrc import ENVRC_FILENAME
+
+
+def test_set_rejects_invalid_env_var(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    result = runner.invoke(cli.app, ["set", "not-valid", "value"])
+    assert result.exit_code == 1
+    assert "Invalid environment variable name" in result.stderr
+
+
+def test_inherit_rejects_invalid_state(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    result = runner.invoke(cli.app, ["inherit", "maybe"])
+    assert result.exit_code == 1
+    assert "inherit expects" in result.stderr
+
+
+def test_get_missing_var_errors(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    runner.invoke(cli.app, ["init"])
+    result = runner.invoke(cli.app, ["get", "MISSING"])
+    assert result.exit_code == 1
+    assert "is not set in the managed block" in result.stderr
+
+
+def test_secret_set_rejects_empty_value(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    runner.invoke(cli.app, ["init"])
+    result = runner.invoke(
+        cli.app,
+        ["secret", "set", "TOKEN", "--account", "acct", "--stdin"],
+        input="",
+    )
+    assert result.exit_code == 1
+    assert "Secret value is empty" in result.stderr
+
+
+def test_eval_requires_managed_block(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    result = runner.invoke(cli.app, ["eval"])
+    assert result.exit_code == 1
+    assert "Managed block not found" in result.stderr
+
+
+def test_doctor_requires_envrc(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    result = runner.invoke(cli.app, ["doctor"])
+    assert result.exit_code == 1
+    assert ".envrc not found" in result.stderr
+
+
+def test_migrate_requires_envrc(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    result = runner.invoke(cli.app, ["migrate"])
+    assert result.exit_code == 1
+    assert ".envrc not found" in result.stderr

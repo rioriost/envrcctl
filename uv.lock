@@ -76,16 +76,22 @@ name = "envrcctl"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [
-    { name = "pytest" },
-    { name = "pytest-cov" },
     { name = "typer" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-cov" },
+]
+
 [package.metadata]
-requires-dist = [
+requires-dist = [{ name = "typer", specifier = ">=0.24.1" }]
+
+[package.metadata.requires-dev]
+dev = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
-    { name = "typer", specifier = ">=0.24.1" },
 ]
 
 [[package]]
