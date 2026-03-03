@@ -360,7 +360,7 @@
         {
           "id": "p5-10",
           "title": "Explicit confirmations for risky operations",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Init/migrate behavior"],
           "outputs": [
             "Confirmation flags for destructive actions",

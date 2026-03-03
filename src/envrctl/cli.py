@@ -61,6 +61,13 @@ def _validate_env_var(name: str) -> None:
         raise EnvrcctlError(f"Invalid environment variable name: {name}")
 
 
+def _confirm_or_abort(message: str, assume_yes: bool) -> None:
+    if assume_yes:
+        return
+    if not typer.confirm(message, default=False):
+        raise EnvrcctlError("Operation cancelled.")
+
+
 def _ensure_not_world_writable(path: Path) -> None:
     if path.exists() and is_world_writable(path):
         raise EnvrcctlError(
@@ -79,11 +86,15 @@ def _write_envrc(doc, block: ManagedBlock) -> None:
 
 
 @app.command()
-def init() -> None:
+def init(
+    yes: bool = typer.Option(False, "--yes", help="Confirm modifying existing .envrc."),
+) -> None:
     """Create .envrc if missing and insert managed block."""
 
     def action() -> None:
         path = _envrc_path()
+        if path.exists():
+            _confirm_or_abort(".envrc exists; proceed with managed block update?", yes)
         doc = load_envrc(path)
         block = ensure_managed_block(doc)
         block.include_inject = True
@@ -333,7 +344,11 @@ def doctor() -> None:
 
 
 @app.command()
-def migrate() -> None:
+def migrate(
+    yes: bool = typer.Option(
+        False, "--yes", help="Confirm migrating unmanaged exports."
+    ),
+) -> None:
     """Move unmanaged exports into the managed block."""
 
     def action() -> None:
@@ -347,6 +362,9 @@ def migrate() -> None:
             doc.before
         )
         after_clean, after_exports, after_secrets = extract_unmanaged_exports(doc.after)
+
+        if before_exports or after_exports or before_secrets or after_secrets:
+            _confirm_or_abort("Migrate unmanaged exports into the managed block?", yes)
 
         for key, value in {**before_exports, **after_exports}.items():
             block.exports.setdefault(key, value)

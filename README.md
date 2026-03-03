@@ -55,6 +55,8 @@ uv run python -m envrctl.main --help
 envrcctl init
 ```
 
+If `.envrc` already exists, you'll be prompted to confirm. Use `--yes` to skip the prompt in non-interactive runs.
+
 2. Add non-secret variables:
 
 ```sh
@@ -135,6 +137,8 @@ envrcctl doctor
 ```sh
 envrcctl migrate
 ```
+
+You'll be prompted when unmanaged exports or secret refs are detected. Use `--yes` to confirm in non-interactive runs.
 
 ## Backend Selection (macOS/Linux)
 
