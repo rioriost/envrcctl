@@ -245,6 +245,74 @@
           ]
         }
       ]
+    },
+    {
+      "id": "phase-5",
+      "name": "Phase 5 — Security Hardening",
+      "goal": "Reduce tool-side security risks and strengthen safe-by-default behavior.",
+      "status": "planned",
+      "tasks": [
+        {
+          "id": "p5-01",
+          "title": "Command execution hardening",
+          "status": "planned",
+          "inputs": ["External command usage inventory"],
+          "outputs": [
+            "Centralized command runner",
+            "Argument validation for command invocations"
+          ]
+        },
+        {
+          "id": "p5-02",
+          "title": "Secret leakage prevention",
+          "status": "planned",
+          "inputs": ["Error paths and output flows"],
+          "outputs": [
+            "Sanitized error messages",
+            "Guarantee only inject emits secret values"
+          ]
+        },
+        {
+          "id": "p5-03",
+          "title": "Filesystem safety checks",
+          "status": "planned",
+          "inputs": ["Current .envrc write and permission checks"],
+          "outputs": [
+            "Strict world-writable enforcement",
+            "Realpath validation to avoid unexpected write targets"
+          ]
+        },
+        {
+          "id": "p5-04",
+          "title": "Backend validation and ref hardening",
+          "status": "planned",
+          "inputs": ["Backend selection logic", "Ref schema"],
+          "outputs": [
+            "Fail-fast selection with clear errors",
+            "Stricter ref validation"
+          ]
+        },
+        {
+          "id": "p5-05",
+          "title": "Safety UX for risky operations",
+          "status": "planned",
+          "inputs": ["Init/migrate behavior", "Doctor checks"],
+          "outputs": [
+            "Explicit confirmation for destructive ops",
+            "Enhanced doctor warnings for risky patterns"
+          ]
+        },
+        {
+          "id": "p5-06",
+          "title": "Security tooling and release checks",
+          "status": "planned",
+          "inputs": ["Static analysis options", "Release workflow"],
+          "outputs": [
+            "Security linting integration",
+            "Release checklist for security-sensitive paths"
+          ]
+        }
+      ]
     }
   ]
 }
