@@ -9,6 +9,22 @@ from envrcctl import cli
 from envrcctl.envrc import ENVRC_FILENAME
 
 
+def test_init_fails_when_direnv_missing(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    def fake_which(cmd, *args, **kwargs):
+        if cmd == "direnv":
+            return None
+        return "/usr/bin/other"
+
+    monkeypatch.setattr(cli.shutil, "which", fake_which)
+
+    result = runner.invoke(cli.app, ["init"])
+    assert result.exit_code == 1
+    assert "direnv not found" in result.stderr
+
+
 def test_set_rejects_invalid_env_var(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()

@@ -110,6 +110,14 @@ def _confirm_or_abort(message: str, assume_yes: bool) -> None:
         raise EnvrcctlError("Operation cancelled.")
 
 
+def _ensure_direnv_available() -> None:
+    if shutil.which("direnv"):
+        return
+    raise EnvrcctlError(
+        "direnv not found in PATH. Install it (e.g. brew install direnv) and ensure it is on PATH."
+    )
+
+
 def _ensure_not_world_writable(path: Path) -> None:
     if path.exists() and is_world_writable(path):
         raise EnvrcctlError(
@@ -134,6 +142,7 @@ def init(
     """Create .envrc if missing and insert managed block."""
 
     def action() -> None:
+        _ensure_direnv_available()
         path = _envrc_path()
         if path.exists():
             _confirm_or_abort(".envrc exists; proceed with managed block update?", yes)
