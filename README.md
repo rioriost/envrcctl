@@ -169,8 +169,8 @@ Secret references are stored as:
 Example:
 
 ```
-kc:com.rio.envrcctl:openai:prod
-ss:com.rio.envrcctl:openai:prod
+kc:st.rio.envrcctl:openai:prod
+ss:st.rio.envrcctl:openai:prod
 ```
 
 ## Shell Completion

@@ -65,7 +65,7 @@ Future Linux:
 
     export BREWFILE="$PWD/Brewfile"
 
-    export ENVRCCTL_SECRET_OPENAI_API_KEY="kc:com.rio.envrcctl:openai:prod"
+    export ENVRCCTL_SECRET_OPENAI_API_KEY="kc:st.rio.envrcctl:openai:prod"
 
     eval "$(envrcctl inject)"
 
@@ -87,11 +87,11 @@ Ref format:
 
 Example:
 
-    kc:com.rio.envrcctl:openai:prod
+    kc:st.rio.envrcctl:openai:prod
 
 Keychain mapping:
 
--   service = com.rio.envrcctl
+-   service = st.rio.envrcctl
 -   account = openai:prod
 -   value = actual secret
 

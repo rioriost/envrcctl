@@ -9,7 +9,7 @@ from typing import Iterable, Protocol
 
 from .errors import EnvrcctlError
 
-DEFAULT_SERVICE = "com.rio.envrcctl"
+DEFAULT_SERVICE = "st.rio.envrcctl"
 SUPPORTED_SCHEMES = ("kc", "ss")
 SERVICE_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 ACCOUNT_RE = re.compile(r"^[A-Za-z0-9._:-]+$")

@@ -129,8 +129,8 @@ CI 向け（標準入力）:
 
 例:
 
-    kc:com.rio.envrcctl:openai:prod
-    ss:com.rio.envrcctl:openai:prod
+    kc:st.rio.envrcctl:openai:prod
+    ss:st.rio.envrcctl:openai:prod
 
 ## シェル補完
 

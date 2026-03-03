@@ -21,7 +21,7 @@ def test_render_and_parse_roundtrip() -> None:
     block = ManagedBlock(
         inherit=True,
         exports={"FOO": "bar", "BAZ": "qux"},
-        secret_refs={"OPENAI_API_KEY": "kc:com.rio.envrcctl:openai:prod"},
+        secret_refs={"OPENAI_API_KEY": "kc:st.rio.envrcctl:openai:prod"},
         include_inject=True,
     )
     rendered = render_managed_block(block)
