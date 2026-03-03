@@ -30,6 +30,7 @@
 ## Documentation
 - [ ] Update `docs/impl_tickets.json` status for completed work.
 - [ ] Review `README.md` and `README.jp.md` for any required changes.
+- [ ] Regenerate shell completions with `uv run python scripts/generate_completions.py` when CLI changes.
 
 ## Release Steps
 - [ ] Tag the release in git (annotated tag).
