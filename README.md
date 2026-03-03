@@ -21,18 +21,21 @@ It is designed for macOS first, with Linux support via SecretService.
 ## Requirements
 
 - Python 3.14+
-- `direnv` (for `.envrc` usage)
+- `direnv`
 - macOS Keychain (built-in) or Linux SecretService (`secret-tool`)
 
 ## Installation
 
 ### macOS (Homebrew)
 
-A Homebrew formula template exists at `Formula/envrcctl.rb`. Replace the URL/SHA256 with a release tarball, then install:
+Tap and install:
 
 ```sh
-brew install --formula ./Formula/envrcctl.rb
+brew tap <YOUR_TAP>
+brew install envrcctl
 ```
+
+After release, Homebrew will download the release from GitHub.
 
 ### Linux (pipx, recommended)
 
