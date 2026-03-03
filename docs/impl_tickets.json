@@ -162,33 +162,33 @@
       "id": "phase-3",
       "name": "Phase 3 — Linux Support & Extensibility",
       "goal": "Linux SecretService backend, backend detection, ref schema extension.",
-      "status": "planned",
+      "status": "done",
       "tasks": [
         {
           "id": "p3-01",
           "title": "SecretService backend implementation",
-          "status": "planned",
+          "status": "done",
           "inputs": ["SecretBackend interface", "secret-tool/libsecret"],
           "outputs": ["Linux backend with get/set/delete/list"]
         },
         {
           "id": "p3-02",
           "title": "Backend selection and detection",
-          "status": "planned",
+          "status": "done",
           "inputs": ["OS detection strategy", "Available backends"],
           "outputs": ["Auto-select backend with optional override"]
         },
         {
           "id": "p3-03",
           "title": "Ref schema extension",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Existing ref format"],
           "outputs": ["Backend-prefixed refs with backward compatibility"]
         },
         {
           "id": "p3-04",
           "title": "Phase 3 docs",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Linux backend behavior", "Ref schema changes"],
           "outputs": ["Updated docs and migration notes"]
         }

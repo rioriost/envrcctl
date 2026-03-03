@@ -19,7 +19,13 @@ from .envrc import (
 )
 from .errors import EnvrcctlError
 from .managed_block import ManagedBlock
-from .secrets import DEFAULT_SERVICE, format_ref, get_default_backend, parse_ref
+from .secrets import (
+    DEFAULT_SERVICE,
+    backend_for_ref,
+    format_ref,
+    parse_ref,
+    resolve_backend,
+)
 
 app = typer.Typer(add_completion=True, help="Manage .envrc with managed blocks.")
 secret_app = typer.Typer(help="Manage secret references.")
@@ -172,8 +178,8 @@ def secret_set(
         value = value.rstrip("\n")
         if not value:
             raise EnvrcctlError("Secret value is empty.")
-        ref = format_ref(service, account)
-        backend = get_default_backend()
+        scheme, backend = resolve_backend()
+        ref = format_ref(service, account, scheme=scheme)
         backend.set(parse_ref(ref), value)
 
         doc = load_envrc(_envrc_path())
@@ -196,8 +202,9 @@ def secret_unset(var: str) -> None:
         ref = block.secret_refs.get(var)
         if not ref:
             raise EnvrcctlError(f"{var} has no secret reference.")
-        backend = get_default_backend()
-        backend.delete(parse_ref(ref))
+        parsed = parse_ref(ref)
+        backend = backend_for_ref(parsed)
+        backend.delete(parsed)
         block.secret_refs.pop(var, None)
         _write_envrc(doc, block)
 
@@ -224,9 +231,9 @@ def inject() -> None:
     def action() -> None:
         doc = load_envrc(_envrc_path())
         block = ensure_managed_block(doc)
-        backend = get_default_backend()
         for key in sorted(block.secret_refs.keys()):
             ref = parse_ref(block.secret_refs[key])
+            backend = backend_for_ref(ref)
             value = backend.get(ref)
             typer.echo(f"export {key}={shlex.quote(value)}")
 

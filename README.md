@@ -206,6 +206,19 @@ To refresh them, run:
 
     uv run python scripts/generate_completions.py
 
+## Backend Selection (Phase 3)
+
+envrcctl selects a secret backend by platform, or from `ENVRCCTL_BACKEND`.
+
+Supported schemes:
+
+- `kc` (macOS Keychain)
+- `ss` (SecretService via `secret-tool`)
+
+Example override: `ENVRCCTL_BACKEND=ss envrcctl secret set OPENAI_API_KEY --account openai:prod`
+
+Secret references are stored as `<scheme>:<service>:<account>` (e.g. `kc:com.rio.envrcctl:openai:prod`).
+
 ## Security Principles
 
 - No secrets in CLI arguments

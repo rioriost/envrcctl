@@ -213,6 +213,23 @@ envrcctl --show-completion bash > completions/envrcctl.bash
 
 リポジトリには `scripts/generate_completions.py` と `completions/` を用意してあります。
 
+## バックエンド選択（Phase 3）
+
+バックエンドは環境変数 `ENVRCCTL_BACKEND` で指定できます。
+
+- `kc`: macOS Keychain（既定）
+- `ss`: SecretService（Linux、`secret-tool` が必要）
+
+参照形式は次の通りです。
+
+- `kc:<service>:<account>`
+- `ss:<service>:<account>`
+
+例:
+
+    kc:com.rio.envrcctl:openai:prod
+    ss:com.rio.envrcctl:openai:prod
+
 ## セキュリティ原則
 
 - CLI 引数にシークレットを渡さない
