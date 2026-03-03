@@ -198,7 +198,7 @@
       "id": "phase-4",
       "name": "Phase 4 — Test & Coverage Workflow",
       "goal": "Align dev dependencies, verify flow, and coverage target.",
-      "status": "in-progress",
+      "status": "done",
       "tasks": [
         {
           "id": "p4-01",
@@ -237,7 +237,7 @@
         {
           "id": "p4-05",
           "title": "Assess feasibility of 100% coverage",
-          "status": "planned",
+          "status": "done",
           "inputs": ["Current coverage report", "Uncovered lines list"],
           "outputs": [
             "Feasibility assessment for 100% coverage",
