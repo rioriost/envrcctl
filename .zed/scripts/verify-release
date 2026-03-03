@@ -5,10 +5,10 @@ cd "$(git rev-parse --show-toplevel)"
 echo "==> verify-release: start"
 
 if command -v uv >/dev/null 2>&1; then
-  uv run python -m pytest --cov=envrctl --cov-report=term-missing --cov-fail-under=90
+  uv run python -m pytest --cov=envrctl --cov-report=term-missing --cov-fail-under=95
   uv run bandit -r src -x tests -s B404,B603,B607
 else
-  python -m pytest --cov=envrctl --cov-report=term-missing --cov-fail-under=90
+  python -m pytest --cov=envrctl --cov-report=term-missing --cov-fail-under=95
   bandit -r src -x tests -s B404,B603,B607
 fi
 
