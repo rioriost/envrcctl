@@ -3,6 +3,7 @@ name = "envrcctl"
 version = "0.0.1"
 description = "Add your description here"
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.14"
 dependencies = [
     "pytest>=9.0.2",
@@ -20,4 +21,4 @@ build-backend = "hatchling.build"
 packages = ["src/envrctl"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/envrctl/**", "README.md", "pyproject.toml"]
+include = ["src/envrctl/**", "README.md", "LICENSE", "pyproject.toml"]
