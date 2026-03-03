@@ -3,8 +3,8 @@ class Envrcctl < Formula
 
   desc "Secure, structured management of .envrc files"
   homepage "https://github.com/rioriost/homebrew-envrcctl"
-  url "https://files.pythonhosted.org/packages/e2/ff/5748263f61aadceca12c7352aa0984772210b3765b8a1705ebed1fe24154/envrcctl-0.0.2.tar.gz"
-  sha256 "cec7056434191f1a7f00575dd09cfcd7803bebb303c39d8133a20c7d81ca8c89"
+  url "https://files.pythonhosted.org/packages/a7/f0/156063195fb8137c7f58a39f7553cae1b85ba6c94c63e2d1eb3c2ff2b24b/envrcctl-0.0.3.tar.gz"
+  sha256 "f55b49be417ea0ccbb87ed0fb20b03c63ca0e2667ff8a5d111f06fbc3cdc0de0"
   license "MIT"
 
 
