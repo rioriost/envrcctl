@@ -167,7 +167,6 @@ def test_cli_exec_on_macos_requires_auth(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
     monkeypatch.setattr(dummy, "get_with_auth", fake_get_with_auth)
-    monkeypatch.setattr(cli, "ensure_device_owner_auth", lambda reason: None)
     monkeypatch.setattr(cli.sys, "platform", "darwin")
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
 
@@ -200,7 +199,6 @@ def test_cli_exec_on_macos_requires_interactive_shell(
 
     monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
-    monkeypatch.setattr(cli, "ensure_device_owner_auth", lambda reason: None)
     monkeypatch.setattr(cli.sys, "platform", "darwin")
     monkeypatch.setattr(cli, "_is_interactive", lambda: False)
 
@@ -233,7 +231,6 @@ def test_cli_exec_on_macos_fails_closed_when_auth_is_cancelled(
     monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
     monkeypatch.setattr(dummy, "get_with_auth", fake_get_with_auth)
-    monkeypatch.setattr(cli, "ensure_device_owner_auth", lambda reason: None)
     monkeypatch.setattr(cli.sys, "platform", "darwin")
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
 
@@ -265,7 +262,6 @@ def test_cli_secret_get_on_macos_requires_auth_for_plain_output(
     monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
     monkeypatch.setattr(dummy, "get_with_auth", fake_get_with_auth)
-    monkeypatch.setattr(cli, "ensure_device_owner_auth", lambda reason: None)
     monkeypatch.setattr(cli.sys, "platform", "darwin")
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
 
@@ -304,7 +300,6 @@ def test_cli_secret_get_on_macos_requires_auth_for_clipboard_default(
     monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
     monkeypatch.setattr(dummy, "get_with_auth", fake_get_with_auth)
-    monkeypatch.setattr(cli, "ensure_device_owner_auth", lambda reason: None)
     monkeypatch.setattr(
         cli, "_copy_to_clipboard", lambda value: clipboard.append(value)
     )
@@ -345,7 +340,6 @@ def test_cli_secret_get_on_macos_fails_closed_when_auth_is_cancelled(
     monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
     monkeypatch.setattr(dummy, "get_with_auth", fake_get_with_auth)
-    monkeypatch.setattr(cli, "ensure_device_owner_auth", lambda reason: None)
     monkeypatch.setattr(
         cli, "_copy_to_clipboard", lambda value: clipboard.append(value)
     )
@@ -378,7 +372,6 @@ def test_cli_inject_on_macos_requires_auth(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
     monkeypatch.setattr(dummy, "get_with_auth", fake_get_with_auth)
-    monkeypatch.setattr(cli, "ensure_device_owner_auth", lambda reason: None)
     monkeypatch.setattr(cli.sys, "platform", "darwin")
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
 
@@ -408,7 +401,6 @@ def test_cli_inject_on_macos_force_does_not_bypass_auth_failure(
     monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
     monkeypatch.setattr(dummy, "get_with_auth", fake_get_with_auth)
-    monkeypatch.setattr(cli, "ensure_device_owner_auth", lambda reason: None)
     monkeypatch.setattr(cli.sys, "platform", "darwin")
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
 
@@ -668,7 +660,6 @@ def test_cli_secret_get_copies_masked(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
-    monkeypatch.setattr(cli, "ensure_device_owner_auth", lambda reason: None)
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
     monkeypatch.setattr(
         cli, "_copy_to_clipboard", lambda value: copied.setdefault("value", value)
@@ -695,7 +686,6 @@ def test_cli_secret_get_plain_interactive(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
-    monkeypatch.setattr(cli, "ensure_device_owner_auth", lambda reason: None)
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
 
     runner.invoke(cli.app, ["init"])

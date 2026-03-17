@@ -12,7 +12,6 @@ from typing import Callable
 
 import typer
 
-from .auth import ensure_device_owner_auth
 from .command_runner import run_command
 from .envrc import (
     ENVRC_FILENAME,
@@ -72,7 +71,6 @@ def _is_interactive() -> bool:
 def _require_secret_access_auth(reason: str) -> str | None:
     if sys.platform != "darwin":
         return None
-    ensure_device_owner_auth(reason)
     return reason
 
 
