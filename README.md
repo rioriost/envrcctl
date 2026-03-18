@@ -16,6 +16,7 @@ It is designed for macOS first, with Linux support via SecretService.
 - Secret kinds (runtime/admin), with exec injecting runtime only
 - Secret get with clipboard default and TTY guard on Linux, plus macOS auth on macOS
 - On macOS, `inject` and `exec` retrieve multiple runtime secrets with a single device owner authentication prompt
+- Tamper-evident local audit log for secret access events
 - Diagnostics and migration helpers
 - Shell completion scripts
 
@@ -227,11 +228,50 @@ macOS-authenticated secret commands.
 envrcctl eval
 ```
 
+### Audit log
+
+```sh
+envrcctl audit list
+envrcctl audit show --index 0
+envrcctl audit verify
+```
+
+`envrcctl` records tamper-evident local audit events for:
+
+- `secret get`
+- `inject`
+- `exec`
+
+The audit log:
+
+- never stores plaintext secret values
+- stores variable names, secret ref metadata, working directory, and `exec` command metadata
+- chains events with `prev_hash` and `hash` so silent modification or deletion is detectable
+
+Default audit log storage locations:
+
+- macOS: `~/Library/Application Support/envrcctl/audit/`
+- Linux: `$XDG_STATE_HOME/envrcctl/audit/` when `XDG_STATE_HOME` is set
+- Linux fallback: `~/.local/state/envrcctl/audit/`
+
+The audit store currently uses:
+
+- `audit.jsonl` for append-only event records
+- `latest_hash` for the latest chain hash
+- `meta.json` for metadata
+
+`envrcctl audit verify` checks the hash chain and reports failures if audit records appear to have been modified.
+
 ### Diagnostics
 
 ```sh
 envrcctl doctor
 ```
+
+`doctor` also checks audit health and warns when:
+
+- the audit chain does not verify
+- the audit store permissions are insecure
 
 ### Migration
 
@@ -301,6 +341,9 @@ uv run python scripts/generate_completions.py
 - On macOS, authenticated commands require the native helper `envrcctl-macos-auth`
 - The helper is discovered from `ENVRCCTL_MACOS_AUTH_HELPER` or `src/envrcctl/envrcctl-macos-auth`
 - If the helper is missing, invalid, or not executable, macOS secret-accessing commands fail closed
+- Secret-access actions are recorded in a local tamper-evident audit log
+- Audit records never include plaintext secret values
+- Audit integrity is based on a hash chain and can be checked with `envrcctl audit verify`
 - The tool refuses to write to world-writable `.envrc`
 
 ## Development

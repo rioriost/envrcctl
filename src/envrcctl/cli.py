@@ -12,6 +12,14 @@ from typing import Callable
 
 import typer
 
+from .audit import (
+    AuditErrorInfo,
+    AuditRef,
+    append_event,
+    ensure_audit_store_secure,
+    iter_events,
+    verify_chain,
+)
 from .command_runner import run_command
 from .envrc import (
     ENVRC_FILENAME,
@@ -34,12 +42,48 @@ from .secrets import (
 
 app = typer.Typer(add_completion=True, help="Manage .envrc with managed blocks.")
 secret_app = typer.Typer(help="Manage secret references.")
+audit_app = typer.Typer(help="Inspect tamper-evident audit records.")
 app.add_typer(secret_app, name="secret")
+app.add_typer(audit_app, name="audit")
 
 ENV_VAR_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 RISKY_EXPORT_RE = re.compile(
     r"(SECRET|TOKEN|PASSWORD|API_KEY|ACCESS_KEY|PRIVATE_KEY)", re.IGNORECASE
 )
+
+
+def _audit_ref(ref) -> AuditRef:
+    return AuditRef(
+        scheme=ref.scheme,
+        service=ref.service,
+        account=ref.account,
+        kind=ref.kind,
+    )
+
+
+def _audit_error(code: str, exc: Exception) -> AuditErrorInfo:
+    return AuditErrorInfo(code=code, message=str(exc))
+
+
+def _record_secret_access_event(
+    *,
+    action: str,
+    status: str,
+    vars: list[str],
+    refs: list,
+    command: list[str] | None = None,
+    error: AuditErrorInfo | None = None,
+) -> None:
+    append_event(
+        action=action,
+        status=status,
+        vars=vars,
+        refs=[_audit_ref(ref) for ref in refs],
+        cwd=Path.cwd(),
+        platform=sys.platform,
+        command=command,
+        error=error,
+    )
 
 
 def _envrc_path() -> Path:
@@ -66,6 +110,12 @@ def _run(action: Callable[[], None]) -> None:
 
 def _is_interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _format_audit_command(command: list[str] | None) -> str:
+    if not command:
+        return "-"
+    return shlex.join(command)
 
 
 def _require_secret_access_auth(reason: str) -> str | None:
@@ -378,29 +428,54 @@ def secret_get(
         parsed = parse_ref(ref)
         backend = backend_for_ref(parsed)
 
-        if not _is_interactive():
-            if not force_plain:
-                raise EnvrcctlError(
-                    "secret get is blocked in non-interactive environments. Use --force-plain to override."
+        try:
+            if not _is_interactive():
+                if not force_plain:
+                    raise EnvrcctlError(
+                        "secret get is blocked in non-interactive environments. Use --force-plain to override."
+                    )
+                if sys.platform == "darwin":
+                    raise EnvrcctlError(
+                        "secret get on macOS requires an interactive shell and device owner authentication."
+                    )
+                value = backend.get(parsed)
+                _record_secret_access_event(
+                    action="secret_get",
+                    status="success",
+                    vars=[var],
+                    refs=[parsed],
                 )
-            if sys.platform == "darwin":
-                raise EnvrcctlError(
-                    "secret get on macOS requires an interactive shell and device owner authentication."
-                )
-            value = backend.get(parsed)
-            typer.echo(value)
-            return
+                typer.echo(value)
+                return
 
-        auth_reason = _require_secret_access_auth(f"Access secret {var} with envrcctl")
-        value = _get_secret_value(backend, parsed, auth_reason)
+            auth_reason = _require_secret_access_auth(
+                f"Access secret {var} with envrcctl"
+            )
+            value = _get_secret_value(backend, parsed, auth_reason)
+            _record_secret_access_event(
+                action="secret_get",
+                status="success",
+                vars=[var],
+                refs=[parsed],
+            )
 
-        if plain or show:
-            typer.echo(value)
-            return
+            if plain or show:
+                typer.echo(value)
+                return
 
-        _copy_to_clipboard(value)
-        masked = _mask_secret(value)
-        typer.echo(f"Copied to clipboard: {var}={masked}")
+            _copy_to_clipboard(value)
+            masked = _mask_secret(value)
+            typer.echo(f"Copied to clipboard: {var}={masked}")
+        except EnvrcctlError as exc:
+            status = "cancelled" if "cancelled" in str(exc).lower() else "failure"
+            _record_secret_access_event(
+                action="secret_get",
+                status=status,
+                vars=[var],
+                refs=[parsed],
+                error=_audit_error("secret_get_failed", exc),
+            )
+            raise
 
     _run(action)
 
@@ -414,32 +489,49 @@ def inject(
     """Emit export statements for all secret references."""
 
     def action() -> None:
-        if not _is_interactive() and not force:
-            raise EnvrcctlError(
-                "inject is blocked in non-interactive environments. Use --force to override."
-            )
-        if sys.platform == "darwin" and not _is_interactive():
-            raise EnvrcctlError(
-                "inject on macOS requires an interactive shell and device owner authentication."
-            )
-        auth_reason = _require_secret_access_auth("Inject secrets with envrcctl")
-        doc = load_envrc(_envrc_path())
-        block = ensure_managed_block(doc)
-
         runtime_refs: list[tuple[str, object]] = []
-        for key in sorted(block.secret_refs.keys()):
-            ref = parse_ref(block.secret_refs[key])
-            if ref.kind != "runtime":
-                continue
-            runtime_refs.append((key, ref))
+        try:
+            if not _is_interactive() and not force:
+                raise EnvrcctlError(
+                    "inject is blocked in non-interactive environments. Use --force to override."
+                )
+            if sys.platform == "darwin" and not _is_interactive():
+                raise EnvrcctlError(
+                    "inject on macOS requires an interactive shell and device owner authentication."
+                )
+            auth_reason = _require_secret_access_auth("Inject secrets with envrcctl")
+            doc = load_envrc(_envrc_path())
+            block = ensure_managed_block(doc)
 
-        values = _get_secret_values(
-            [ref for _, ref in runtime_refs],
-            auth_reason,
-        )
-        for key, ref in runtime_refs:
-            value = values[(ref.service, ref.account)]
-            typer.echo(f"export {key}={shlex.quote(value)}")
+            for key in sorted(block.secret_refs.keys()):
+                ref = parse_ref(block.secret_refs[key])
+                if ref.kind != "runtime":
+                    continue
+                runtime_refs.append((key, ref))
+
+            values = _get_secret_values(
+                [ref for _, ref in runtime_refs],
+                auth_reason,
+            )
+            _record_secret_access_event(
+                action="inject",
+                status="success",
+                vars=[key for key, _ in runtime_refs],
+                refs=[ref for _, ref in runtime_refs],
+            )
+            for key, ref in runtime_refs:
+                value = values[(ref.service, ref.account)]
+                typer.echo(f"export {key}={shlex.quote(value)}")
+        except EnvrcctlError as exc:
+            status = "cancelled" if "cancelled" in str(exc).lower() else "failure"
+            _record_secret_access_event(
+                action="inject",
+                status=status,
+                vars=[key for key, _ in runtime_refs],
+                refs=[ref for _, ref in runtime_refs],
+                error=_audit_error("inject_failed", exc),
+            )
+            raise
 
     _run(action)
 
@@ -460,57 +552,277 @@ def exec_cmd(
     """Execute a command with managed secrets injected into the environment."""
 
     def action() -> None:
-        if not ctx.args:
-            raise EnvrcctlError("No command provided. Use -- to separate the command.")
-        if not _is_interactive():
-            if sys.platform == "darwin":
-                raise EnvrcctlError(
-                    "exec on macOS requires an interactive shell and device owner authentication."
-                )
-            raise EnvrcctlError("exec is blocked in non-interactive environments.")
-        auth_reason = _require_secret_access_auth("Execute command with envrcctl")
-        doc = load_envrc(_envrc_path())
-        block = ensure_managed_block(doc)
-
-        selected_keys = {item for item in key} if key else None
-        if selected_keys is not None:
-            available_keys = {item for item in block.secret_refs.keys()}
-            missing = selected_keys - available_keys
-            if missing:
-                missing_list = ", ".join(sorted(missing))
-                raise EnvrcctlError(
-                    f"Secrets not found in managed block: {missing_list}"
-                )
-
-        env = os.environ.copy()
-        for name, value in block.exports.items():
-            env[name] = value
-
         runtime_refs: list[tuple[str, object]] = []
-        for name in sorted(block.secret_refs.keys()):
-            if selected_keys is not None and name not in selected_keys:
-                continue
-            ref = parse_ref(block.secret_refs[name])
-            if ref.kind != "runtime":
-                if selected_keys is not None and name in selected_keys:
+        command = list(ctx.args)
+        try:
+            if not ctx.args:
+                raise EnvrcctlError(
+                    "No command provided. Use -- to separate the command."
+                )
+            if not _is_interactive():
+                if sys.platform == "darwin":
                     raise EnvrcctlError(
-                        f"Secret {name} is admin and cannot be injected via exec."
+                        "exec on macOS requires an interactive shell and device owner authentication."
                     )
-                continue
-            runtime_refs.append((name, ref))
+                raise EnvrcctlError("exec is blocked in non-interactive environments.")
+            auth_reason = _require_secret_access_auth("Execute command with envrcctl")
+            doc = load_envrc(_envrc_path())
+            block = ensure_managed_block(doc)
 
-        values = _get_secret_values(
-            [ref for _, ref in runtime_refs],
-            auth_reason,
-        )
-        for name, ref in runtime_refs:
-            env[name] = values[(ref.service, ref.account)]
+            selected_keys = {item for item in key} if key else None
+            if selected_keys is not None:
+                available_keys = {item for item in block.secret_refs.keys()}
+                missing = selected_keys - available_keys
+                if missing:
+                    missing_list = ", ".join(sorted(missing))
+                    raise EnvrcctlError(
+                        f"Secrets not found in managed block: {missing_list}"
+                    )
 
-        result = subprocess.run(list(ctx.args), env=env)
-        if result.returncode != 0:
-            raise typer.Exit(code=result.returncode)
+            env = os.environ.copy()
+            for name, value in block.exports.items():
+                env[name] = value
+
+            for name in sorted(block.secret_refs.keys()):
+                if selected_keys is not None and name not in selected_keys:
+                    continue
+                ref = parse_ref(block.secret_refs[name])
+                if ref.kind != "runtime":
+                    if selected_keys is not None and name in selected_keys:
+                        raise EnvrcctlError(
+                            f"Secret {name} is admin and cannot be injected via exec."
+                        )
+                    continue
+                runtime_refs.append((name, ref))
+
+            values = _get_secret_values(
+                [ref for _, ref in runtime_refs],
+                auth_reason,
+            )
+            for name, ref in runtime_refs:
+                env[name] = values[(ref.service, ref.account)]
+
+            result = subprocess.run(command, env=env)
+            status = "success" if result.returncode == 0 else "failure"
+            _record_secret_access_event(
+                action="exec",
+                status=status,
+                vars=[name for name, _ in runtime_refs],
+                refs=[ref for _, ref in runtime_refs],
+                command=command,
+            )
+            if result.returncode != 0:
+                raise typer.Exit(code=result.returncode)
+        except EnvrcctlError as exc:
+            status = "cancelled" if "cancelled" in str(exc).lower() else "failure"
+            _record_secret_access_event(
+                action="exec",
+                status=status,
+                vars=[name for name, _ in runtime_refs],
+                refs=[ref for _, ref in runtime_refs],
+                command=command or None,
+                error=_audit_error("exec_failed", exc),
+            )
+            raise
 
     _run(action)
+
+
+@audit_app.command("list")
+def audit_list(
+    limit: int = typer.Option(20, "--limit", min=1, help="Maximum events to show."),
+    action: str | None = typer.Option(None, "--action", help="Filter by audit action."),
+    var: str | None = typer.Option(None, "--var", help="Filter by variable name."),
+    status: str | None = typer.Option(None, "--status", help="Filter by audit status."),
+    json_output: bool = typer.Option(
+        False, "--json", help="Emit matching events as JSON."
+    ),
+) -> None:
+    """List recent audit events."""
+
+    def action_fn() -> None:
+        events = list(iter_events())
+        if action is not None:
+            events = [event for event in events if event.action == action]
+        if var is not None:
+            events = [event for event in events if var in event.vars]
+        if status is not None:
+            events = [event for event in events if event.status == status]
+
+        events = list(reversed(events))[:limit]
+
+        if json_output:
+            import json
+
+            typer.echo(
+                json.dumps(
+                    [
+                        {
+                            "event_id": event.event_id,
+                            "timestamp": event.timestamp,
+                            "action": event.action,
+                            "status": event.status,
+                            "vars": event.vars,
+                            "refs": [
+                                {
+                                    "scheme": ref.scheme,
+                                    "service": ref.service,
+                                    "account": ref.account,
+                                    "kind": ref.kind,
+                                }
+                                for ref in event.refs
+                            ],
+                            "cwd": event.cwd,
+                            "platform": event.platform,
+                            "command": event.command,
+                            "error": (
+                                {
+                                    "code": event.error.code,
+                                    "message": event.error.message,
+                                }
+                                if event.error is not None
+                                else None
+                            ),
+                            "prev_hash": event.prev_hash,
+                            "hash": event.hash,
+                        }
+                        for event in events
+                    ],
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return
+
+        for event in events:
+            vars_display = ",".join(event.vars) if event.vars else "-"
+            command_display = _format_audit_command(event.command)
+            typer.echo(
+                f"{event.timestamp}  {event.action:<10}  {event.status:<9}  "
+                f"{vars_display:<20}  {command_display}"
+            )
+
+    _run(action_fn)
+
+
+@audit_app.command("show")
+def audit_show(
+    event_id: str | None = typer.Option(
+        None, "--event-id", help="Show a specific audit event by id."
+    ),
+    index: int | None = typer.Option(
+        None, "--index", min=0, help="Show an event by zero-based index."
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Emit the selected event as JSON."
+    ),
+) -> None:
+    """Show one audit event in detail."""
+
+    def action_fn() -> None:
+        events = list(iter_events())
+        if event_id is not None and index is not None:
+            raise EnvrcctlError("Use either --event-id or --index, not both.")
+        if event_id is None and index is None:
+            raise EnvrcctlError("Either --event-id or --index is required.")
+
+        selected = None
+        if event_id is not None:
+            for event in events:
+                if event.event_id == event_id:
+                    selected = event
+                    break
+            if selected is None:
+                raise EnvrcctlError(f"Audit event not found: {event_id}")
+        else:
+            if index is None or index >= len(events):
+                raise EnvrcctlError("Audit event index is out of range.")
+            selected = events[index]
+
+        if json_output:
+            import json
+
+            typer.echo(
+                json.dumps(
+                    {
+                        "event_id": selected.event_id,
+                        "timestamp": selected.timestamp,
+                        "action": selected.action,
+                        "status": selected.status,
+                        "vars": selected.vars,
+                        "refs": [
+                            {
+                                "scheme": ref.scheme,
+                                "service": ref.service,
+                                "account": ref.account,
+                                "kind": ref.kind,
+                            }
+                            for ref in selected.refs
+                        ],
+                        "cwd": selected.cwd,
+                        "platform": selected.platform,
+                        "command": selected.command,
+                        "error": (
+                            {
+                                "code": selected.error.code,
+                                "message": selected.error.message,
+                            }
+                            if selected.error is not None
+                            else None
+                        ),
+                        "prev_hash": selected.prev_hash,
+                        "hash": selected.hash,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return
+
+        typer.echo(f"event_id: {selected.event_id}")
+        typer.echo(f"timestamp: {selected.timestamp}")
+        typer.echo(f"action: {selected.action}")
+        typer.echo(f"status: {selected.status}")
+        typer.echo(f"cwd: {selected.cwd}")
+        typer.echo(f"platform: {selected.platform}")
+        typer.echo(f"command: {_format_audit_command(selected.command)}")
+        typer.echo("vars:")
+        for item in selected.vars:
+            typer.echo(f"  - {item}")
+        typer.echo("refs:")
+        for ref in selected.refs:
+            typer.echo(f"  - {ref.scheme}:{ref.service}:{ref.account}:{ref.kind}")
+        if selected.error is not None:
+            typer.echo("error:")
+            typer.echo(f"  code: {selected.error.code}")
+            typer.echo(f"  message: {selected.error.message}")
+        typer.echo(f"prev_hash: {selected.prev_hash or '-'}")
+        typer.echo(f"hash: {selected.hash}")
+
+    _run(action_fn)
+
+
+@audit_app.command("verify")
+def audit_verify() -> None:
+    """Verify audit chain integrity."""
+
+    def action_fn() -> None:
+        result = verify_chain()
+        if not result.ok:
+            typer.echo("FAIL")
+            if result.failure_line is not None:
+                typer.echo(f"line: {result.failure_line}")
+            if result.failure_event_id is not None:
+                typer.echo(f"event_id: {result.failure_event_id}")
+            if result.failure_reason is not None:
+                typer.echo(f"reason: {result.failure_reason}")
+            raise EnvrcctlError("Audit verification failed.")
+
+        typer.echo("OK")
+        typer.echo(f"events: {result.event_count}")
+        typer.echo(f"latest_hash: {result.latest_hash or '-'}")
+
+    _run(action_fn)
 
 
 @app.command()
@@ -594,7 +906,7 @@ def doctor() -> None:
             warnings += 1
         elif doc.managed and not doc.managed.include_inject:
             typer.echo(
-                "WARN: inject line missing in managed block. Run `envrcctl init --inject` to add it.",
+                "WARN: inject line missing in managed block. direnv auto-injection is not enabled. Run `envrcctl init --inject` to add it.",
                 err=True,
             )
             warnings += 1
@@ -633,6 +945,35 @@ def doctor() -> None:
                 err=True,
             )
             warnings += 1
+
+        audit_result = verify_chain()
+        if not audit_result.ok:
+            typer.echo(
+                "WARN: audit chain verification failed."
+                + (
+                    f" line={audit_result.failure_line}"
+                    if audit_result.failure_line is not None
+                    else ""
+                )
+                + (
+                    f" event_id={audit_result.failure_event_id}"
+                    if audit_result.failure_event_id is not None
+                    else ""
+                )
+                + (
+                    f" reason={audit_result.failure_reason}"
+                    if audit_result.failure_reason is not None
+                    else ""
+                ),
+                err=True,
+            )
+            warnings += 1
+        else:
+            try:
+                ensure_audit_store_secure()
+            except EnvrcctlError as exc:
+                typer.echo(f"WARN: audit store is not secure: {exc}", err=True)
+                warnings += 1
 
         if warnings == 0:
             typer.echo("OK")

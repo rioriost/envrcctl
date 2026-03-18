@@ -8,6 +8,7 @@ from typing import Dict
 from typer.testing import CliRunner
 
 from envrcctl import cli
+from envrcctl.audit import AuditErrorInfo, AuditRef
 from envrcctl.envrc import ENVRC_FILENAME
 from envrcctl.errors import EnvrcctlError
 from envrcctl.managed_block import ManagedBlock, render_managed_block
@@ -158,6 +159,298 @@ def test_cli_exec_injects_secrets_into_child(tmp_path: Path, monkeypatch) -> Non
     script = "import os, sys; sys.exit(0 if os.getenv('TOKEN') == 'secretvalue' else 1)"
     result = runner.invoke(cli.app, ["exec", "--", sys.executable, "-c", script])
     assert result.exit_code == 0
+
+
+def test_cli_secret_get_records_success_audit_event(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    dummy = DummyBackend()
+    audit_calls: list[dict] = []
+
+    monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
+    monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
+    monkeypatch.setattr(cli, "_is_interactive", lambda: True)
+    monkeypatch.setattr(
+        cli, "append_event", lambda **kwargs: audit_calls.append(kwargs)
+    )
+    monkeypatch.setattr(cli.sys, "platform", "linux")
+
+    runner.invoke(cli.app, ["init"])
+    runner.invoke(
+        cli.app,
+        ["secret", "set", "TOKEN", "--account", "acct", "--stdin"],
+        input="secretvalue",
+    )
+
+    result = runner.invoke(cli.app, ["secret", "get", "TOKEN", "--plain"])
+
+    assert result.exit_code == 0
+    assert result.stdout.strip() == "secretvalue"
+    assert audit_calls == [
+        {
+            "action": "secret_get",
+            "status": "success",
+            "vars": ["TOKEN"],
+            "refs": [
+                AuditRef(
+                    scheme="kc",
+                    service="st.rio.envrcctl",
+                    account="acct",
+                    kind="runtime",
+                )
+            ],
+            "cwd": tmp_path,
+            "platform": "linux",
+            "command": None,
+            "error": None,
+        }
+    ]
+
+
+def test_cli_secret_get_records_failure_audit_event(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    dummy = DummyBackend()
+    audit_calls: list[dict] = []
+
+    def fake_get(ref) -> str:
+        raise EnvrcctlError("boom")
+
+    monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
+    monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
+    monkeypatch.setattr(dummy, "get", fake_get)
+    monkeypatch.setattr(cli, "_is_interactive", lambda: False)
+    monkeypatch.setattr(
+        cli, "append_event", lambda **kwargs: audit_calls.append(kwargs)
+    )
+    monkeypatch.setattr(cli.sys, "platform", "linux")
+
+    runner.invoke(cli.app, ["init"])
+    runner.invoke(
+        cli.app,
+        ["secret", "set", "TOKEN", "--account", "acct", "--stdin"],
+        input="secretvalue",
+    )
+
+    result = runner.invoke(cli.app, ["secret", "get", "TOKEN", "--force-plain"])
+
+    assert result.exit_code == 1
+    assert "boom" in result.stderr
+    assert audit_calls == [
+        {
+            "action": "secret_get",
+            "status": "failure",
+            "vars": ["TOKEN"],
+            "refs": [
+                AuditRef(
+                    scheme="kc",
+                    service="st.rio.envrcctl",
+                    account="acct",
+                    kind="runtime",
+                )
+            ],
+            "cwd": tmp_path,
+            "platform": "linux",
+            "command": None,
+            "error": AuditErrorInfo(code="secret_get_failed", message="boom"),
+        }
+    ]
+
+
+def test_cli_inject_records_success_audit_event(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    dummy = DummyBackend()
+    audit_calls: list[dict] = []
+
+    monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
+    monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
+    monkeypatch.setattr(cli, "_is_interactive", lambda: True)
+    monkeypatch.setattr(
+        cli, "append_event", lambda **kwargs: audit_calls.append(kwargs)
+    )
+    monkeypatch.setattr(cli.sys, "platform", "linux")
+
+    runner.invoke(cli.app, ["init"])
+    runner.invoke(
+        cli.app,
+        ["secret", "set", "TOKEN", "--account", "acct", "--stdin"],
+        input="secretvalue",
+    )
+
+    result = runner.invoke(cli.app, ["inject"])
+
+    assert result.exit_code == 0
+    assert "export TOKEN=secretvalue" in result.stdout
+    assert audit_calls == [
+        {
+            "action": "inject",
+            "status": "success",
+            "vars": ["TOKEN"],
+            "refs": [
+                AuditRef(
+                    scheme="kc",
+                    service="st.rio.envrcctl",
+                    account="acct",
+                    kind="runtime",
+                )
+            ],
+            "cwd": tmp_path,
+            "platform": "linux",
+            "command": None,
+            "error": None,
+        }
+    ]
+
+
+def test_cli_inject_records_failure_audit_event(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    dummy = DummyBackend()
+    audit_calls: list[dict] = []
+
+    def fake_get(ref) -> str:
+        raise EnvrcctlError("boom")
+
+    monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
+    monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
+    monkeypatch.setattr(dummy, "get", fake_get)
+    monkeypatch.setattr(cli, "_is_interactive", lambda: True)
+    monkeypatch.setattr(
+        cli, "append_event", lambda **kwargs: audit_calls.append(kwargs)
+    )
+    monkeypatch.setattr(cli.sys, "platform", "linux")
+
+    runner.invoke(cli.app, ["init"])
+    runner.invoke(
+        cli.app,
+        ["secret", "set", "TOKEN", "--account", "acct", "--stdin"],
+        input="secretvalue",
+    )
+
+    result = runner.invoke(cli.app, ["inject"])
+
+    assert result.exit_code == 1
+    assert "boom" in result.stderr
+    assert audit_calls == [
+        {
+            "action": "inject",
+            "status": "failure",
+            "vars": ["TOKEN"],
+            "refs": [
+                AuditRef(
+                    scheme="kc",
+                    service="st.rio.envrcctl",
+                    account="acct",
+                    kind="runtime",
+                )
+            ],
+            "cwd": tmp_path,
+            "platform": "linux",
+            "command": None,
+            "error": AuditErrorInfo(code="inject_failed", message="boom"),
+        }
+    ]
+
+
+def test_cli_exec_records_success_audit_event(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    dummy = DummyBackend()
+    audit_calls: list[dict] = []
+
+    monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
+    monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
+    monkeypatch.setattr(cli, "_is_interactive", lambda: True)
+    monkeypatch.setattr(
+        cli, "append_event", lambda **kwargs: audit_calls.append(kwargs)
+    )
+    monkeypatch.setattr(cli.sys, "platform", "linux")
+
+    runner.invoke(cli.app, ["init"])
+    runner.invoke(
+        cli.app,
+        ["secret", "set", "TOKEN", "--account", "acct", "--stdin"],
+        input="secretvalue",
+    )
+
+    script = "import os, sys; sys.exit(0 if os.getenv('TOKEN') == 'secretvalue' else 1)"
+    result = runner.invoke(cli.app, ["exec", "--", sys.executable, "-c", script])
+
+    assert result.exit_code == 0
+    assert audit_calls == [
+        {
+            "action": "exec",
+            "status": "success",
+            "vars": ["TOKEN"],
+            "refs": [
+                AuditRef(
+                    scheme="kc",
+                    service="st.rio.envrcctl",
+                    account="acct",
+                    kind="runtime",
+                )
+            ],
+            "cwd": tmp_path,
+            "platform": "linux",
+            "command": [sys.executable, "-c", script],
+            "error": None,
+        }
+    ]
+
+
+def test_cli_exec_records_failure_audit_event(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    dummy = DummyBackend()
+    audit_calls: list[dict] = []
+
+    def fake_get(ref) -> str:
+        raise EnvrcctlError("boom")
+
+    monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
+    monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
+    monkeypatch.setattr(dummy, "get", fake_get)
+    monkeypatch.setattr(cli, "_is_interactive", lambda: True)
+    monkeypatch.setattr(
+        cli, "append_event", lambda **kwargs: audit_calls.append(kwargs)
+    )
+    monkeypatch.setattr(cli.sys, "platform", "linux")
+
+    runner.invoke(cli.app, ["init"])
+    runner.invoke(
+        cli.app,
+        ["secret", "set", "TOKEN", "--account", "acct", "--stdin"],
+        input="secretvalue",
+    )
+
+    result = runner.invoke(cli.app, ["exec", "--", "printenv"])
+
+    assert result.exit_code == 1
+    assert "boom" in result.stderr
+    assert audit_calls == [
+        {
+            "action": "exec",
+            "status": "failure",
+            "vars": ["TOKEN"],
+            "refs": [
+                AuditRef(
+                    scheme="kc",
+                    service="st.rio.envrcctl",
+                    account="acct",
+                    kind="runtime",
+                )
+            ],
+            "cwd": tmp_path,
+            "platform": "linux",
+            "command": ["printenv"],
+            "error": AuditErrorInfo(code="exec_failed", message="boom"),
+        }
+    ]
 
 
 def test_cli_exec_on_macos_requires_auth(tmp_path: Path, monkeypatch) -> None:
@@ -1645,7 +1938,99 @@ def test_doctor_ok_when_no_warnings(tmp_path: Path, monkeypatch) -> None:
     (tmp_path / ENVRC_FILENAME).write_text(
         render_managed_block(block), encoding="utf-8"
     )
+    monkeypatch.setattr(
+        cli,
+        "verify_chain",
+        lambda: type(
+            "AuditVerifyResultStub",
+            (),
+            {
+                "ok": True,
+                "event_count": 0,
+                "latest_hash": None,
+                "failure_line": None,
+                "failure_event_id": None,
+                "failure_reason": None,
+            },
+        )(),
+    )
+    monkeypatch.setattr(cli, "ensure_audit_store_secure", lambda: None)
 
     result = runner.invoke(cli.app, ["doctor"])
     assert result.exit_code == 0
     assert result.stdout.strip() == "OK"
+
+
+def test_doctor_warns_when_audit_chain_verification_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    block = ManagedBlock(include_inject=True)
+    (tmp_path / ENVRC_FILENAME).write_text(
+        render_managed_block(block), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        cli,
+        "verify_chain",
+        lambda: type(
+            "AuditVerifyResultStub",
+            (),
+            {
+                "ok": False,
+                "event_count": 1,
+                "latest_hash": "hash-1",
+                "failure_line": 2,
+                "failure_event_id": "evt-2",
+                "failure_reason": "Audit event hash mismatch.",
+            },
+        )(),
+    )
+
+    result = runner.invoke(cli.app, ["doctor"])
+    assert result.exit_code == 0
+    assert "audit chain verification failed" in result.stderr
+    assert "line=2" in result.stderr
+    assert "event_id=evt-2" in result.stderr
+    assert "reason=Audit event hash mismatch." in result.stderr
+
+
+def test_doctor_warns_when_audit_store_is_not_secure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    block = ManagedBlock(include_inject=True)
+    (tmp_path / ENVRC_FILENAME).write_text(
+        render_managed_block(block), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        cli,
+        "verify_chain",
+        lambda: type(
+            "AuditVerifyResultStub",
+            (),
+            {
+                "ok": True,
+                "event_count": 0,
+                "latest_hash": None,
+                "failure_line": None,
+                "failure_event_id": None,
+                "failure_reason": None,
+            },
+        )(),
+    )
+
+    def fake_ensure_audit_store_secure() -> None:
+        raise EnvrcctlError("permissions are insecure")
+
+    monkeypatch.setattr(
+        cli, "ensure_audit_store_secure", fake_ensure_audit_store_secure
+    )
+
+    result = runner.invoke(cli.app, ["doctor"])
+    assert result.exit_code == 0
+    assert "audit store is not secure" in result.stderr
+    assert "permissions are insecure" in result.stderr
