@@ -217,17 +217,13 @@ def _write_envrc(doc, block: ManagedBlock) -> None:
     _ensure_not_world_writable(path)
     warn = write_envrc(path, doc, block)
     if warn:
-        raise EnvrcctlError(
-            ".envrc is world-writable after write. Fix permissions and retry."
-        )
+        raise EnvrcctlError(".envrc is world-writable after write. Fix permissions and retry.")
 
 
 @app.command()
 def init(
     yes: bool = typer.Option(False, "--yes", help="Confirm modifying existing .envrc."),
-    inject: bool = typer.Option(
-        False, "--inject", help="Add inject line to managed block."
-    ),
+    inject: bool = typer.Option(False, "--inject", help="Add inject line to managed block."),
 ) -> None:
     """Create .envrc if missing and insert managed block."""
 
@@ -264,9 +260,7 @@ def inherit(state: str = typer.Argument(..., help="on/off")) -> None:
 def set(
     var: str,
     value: str,
-    inject: bool = typer.Option(
-        False, "--inject", help="Add inject line to managed block."
-    ),
+    inject: bool = typer.Option(False, "--inject", help="Add inject line to managed block."),
 ) -> None:
     """Set a non-secret export in the managed block."""
 
@@ -329,14 +323,10 @@ def list_exports() -> None:
 def secret_set(
     var: str,
     account: str = typer.Option(..., "--account", help="Keychain account name."),
-    service: str = typer.Option(
-        DEFAULT_SERVICE, "--service", help="Keychain service name."
-    ),
+    service: str = typer.Option(DEFAULT_SERVICE, "--service", help="Keychain service name."),
     kind: str = typer.Option("runtime", "--kind", help="Secret kind (runtime/admin)."),
     stdin: bool = typer.Option(False, "--stdin", help="Read secret from stdin."),
-    inject: bool = typer.Option(
-        False, "--inject", help="Add inject line to managed block."
-    ),
+    inject: bool = typer.Option(False, "--inject", help="Add inject line to managed block."),
 ) -> None:
     """Store a secret and add its reference to the managed block."""
 
@@ -380,8 +370,7 @@ def secret_unset(var: str) -> None:
         parsed = parse_ref(ref)
 
         shared_ref_in_use = any(
-            name != var and other_ref == ref
-            for name, other_ref in block.secret_refs.items()
+            name != var and other_ref == ref for name, other_ref in block.secret_refs.items()
         )
 
         if not shared_ref_in_use:
@@ -448,9 +437,7 @@ def secret_get(
                 typer.echo(value)
                 return
 
-            auth_reason = _require_secret_access_auth(
-                f"Access secret {var} with envrcctl"
-            )
+            auth_reason = _require_secret_access_auth(f"Access secret {var} with envrcctl")
             value = _get_secret_value(backend, parsed, auth_reason)
             _record_secret_access_event(
                 action="secret_get",
@@ -556,9 +543,7 @@ def exec_cmd(
         command = list(ctx.args)
         try:
             if not ctx.args:
-                raise EnvrcctlError(
-                    "No command provided. Use -- to separate the command."
-                )
+                raise EnvrcctlError("No command provided. Use -- to separate the command.")
             if not _is_interactive():
                 if sys.platform == "darwin":
                     raise EnvrcctlError(
@@ -575,9 +560,7 @@ def exec_cmd(
                 missing = selected_keys - available_keys
                 if missing:
                     missing_list = ", ".join(sorted(missing))
-                    raise EnvrcctlError(
-                        f"Secrets not found in managed block: {missing_list}"
-                    )
+                    raise EnvrcctlError(f"Secrets not found in managed block: {missing_list}")
 
             env = os.environ.copy()
             for name, value in block.exports.items():
@@ -634,9 +617,7 @@ def audit_list(
     action: str | None = typer.Option(None, "--action", help="Filter by audit action."),
     var: str | None = typer.Option(None, "--var", help="Filter by variable name."),
     status: str | None = typer.Option(None, "--status", help="Filter by audit status."),
-    json_output: bool = typer.Option(
-        False, "--json", help="Emit matching events as JSON."
-    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit matching events as JSON."),
 ) -> None:
     """List recent audit events."""
 
@@ -713,9 +694,7 @@ def audit_show(
     index: int | None = typer.Option(
         None, "--index", min=0, help="Show an event by zero-based index."
     ),
-    json_output: bool = typer.Option(
-        False, "--json", help="Emit the selected event as JSON."
-    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit the selected event as JSON."),
 ) -> None:
     """Show one audit event in detail."""
 
@@ -911,9 +890,7 @@ def doctor() -> None:
             )
             warnings += 1
 
-        before_clean, before_exports, before_secrets = extract_unmanaged_exports(
-            doc.before
-        )
+        before_clean, before_exports, before_secrets = extract_unmanaged_exports(doc.before)
         after_clean, after_exports, after_secrets = extract_unmanaged_exports(doc.after)
         unmanaged = {**before_exports, **after_exports}
         unmanaged_secrets = {**before_secrets, **after_secrets}
@@ -983,12 +960,8 @@ def doctor() -> None:
 
 @app.command()
 def migrate(
-    yes: bool = typer.Option(
-        False, "--yes", help="Confirm migrating unmanaged exports."
-    ),
-    inject: bool = typer.Option(
-        False, "--inject", help="Add inject line to managed block."
-    ),
+    yes: bool = typer.Option(False, "--yes", help="Confirm migrating unmanaged exports."),
+    inject: bool = typer.Option(False, "--inject", help="Add inject line to managed block."),
 ) -> None:
     """Move unmanaged exports into the managed block."""
 
@@ -999,9 +972,7 @@ def migrate(
         doc = load_envrc(path)
         block = ensure_managed_block(doc)
 
-        before_clean, before_exports, before_secrets = extract_unmanaged_exports(
-            doc.before
-        )
+        before_clean, before_exports, before_secrets = extract_unmanaged_exports(doc.before)
         after_clean, after_exports, after_secrets = extract_unmanaged_exports(doc.after)
 
         if before_exports or after_exports or before_secrets or after_secrets:
