@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import shutil
 import subprocess
 import sys
@@ -38,6 +39,87 @@ def project_version(pyproject_path: Path) -> str:
             if value.startswith("'") and value.endswith("'"):
                 return value[1:-1]
     raise RuntimeError(f"Could not find project version in {pyproject_path}")
+
+
+def project_dependencies(pyproject_path: Path) -> list[str]:
+    text = pyproject_path.read_text(encoding="utf-8")
+    match = re.search(r"(?ms)^\[project\]\n.*?^dependencies\s*=\s*\[(.*?)\]", text)
+    if not match:
+        return []
+
+    dependencies: list[str] = []
+    for raw_line in match.group(1).splitlines():
+        stripped = raw_line.strip().rstrip(",")
+        if not stripped:
+            continue
+        if stripped.startswith('"') and stripped.endswith('"'):
+            dependencies.append(stripped[1:-1])
+        elif stripped.startswith("'") and stripped.endswith("'"):
+            dependencies.append(stripped[1:-1])
+    return dependencies
+
+
+def normalize_package_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def dependency_name(requirement: str) -> str:
+    base = re.split(r"[<>=!~;\[\]\s]", requirement, maxsplit=1)[0]
+    if not base:
+        raise RuntimeError(f"Could not parse dependency requirement: {requirement}")
+    return normalize_package_name(base)
+
+
+def uv_lock_package_block(lock_text: str, package_name: str) -> str:
+    normalized = normalize_package_name(package_name)
+    current: list[str] = []
+    in_package = False
+
+    for line in lock_text.splitlines():
+        if line == "[[package]]":
+            if in_package:
+                block = "\n".join(current)
+                name_match = re.search(r'^name = "([^"]+)"$', block, re.MULTILINE)
+                if name_match and normalize_package_name(name_match.group(1)) == normalized:
+                    return block
+            current = [line]
+            in_package = True
+            continue
+
+        if in_package:
+            current.append(line)
+
+    if in_package:
+        block = "\n".join(current)
+        name_match = re.search(r'^name = "([^"]+)"$', block, re.MULTILINE)
+        if name_match and normalize_package_name(name_match.group(1)) == normalized:
+            return block
+
+    raise RuntimeError(f"Package {package_name!r} not found in uv.lock")
+
+
+def extract_sdist_url_and_sha(block: str, package_name: str) -> tuple[str, str]:
+    sdist_match = re.search(
+        r'sdist = \{ url = "([^"]+\.tar\.gz)", hash = "sha256:([0-9a-f]+)"',
+        block,
+    )
+    if sdist_match:
+        return sdist_match.group(1), sdist_match.group(2)
+
+    raise RuntimeError(f"Could not find sdist URL and sha256 for {package_name!r} in uv.lock")
+
+
+def dependency_resource_specs(repo_root: Path) -> list[tuple[str, str, str]]:
+    lock_text = (repo_root / "uv.lock").read_text(encoding="utf-8")
+    specs: list[tuple[str, str, str]] = []
+
+    for requirement in project_dependencies(repo_root / "pyproject.toml"):
+        package_name = dependency_name(requirement)
+        block = uv_lock_package_block(lock_text, package_name)
+        url, sha256 = extract_sdist_url_and_sha(block, package_name)
+        specs.append((package_name, url, sha256))
+
+    return specs
 
 
 def require_command(name: str) -> None:
@@ -141,10 +223,25 @@ def formula_content(
     helper_sha256: str,
     homepage: str,
     license_name: str,
+    dependency_resources: list[tuple[str, str, str]],
 ) -> str:
     release_base = f"{homepage}/releases/download/{version}"
     source_url = f"{release_base}/envrcctl-{version}.tar.gz"
     helper_url = f"{release_base}/envrcctl-macos-auth-{version}-arm64.tar.gz"
+
+    resource_blocks = []
+    install_lines = []
+    for package_name, package_url, package_sha256 in dependency_resources:
+        resource_blocks.append(
+            f"""  resource "{package_name}" do
+    url "{package_url}"
+    sha256 "{package_sha256}"
+  end"""
+        )
+        install_lines.append(f'    venv.pip_install resource("{package_name}")')
+
+    resources_section = "\n\n".join(resource_blocks)
+    install_resources = "\n".join(install_lines)
 
     return f"""class Envrcctl < Formula
   include Language::Python::Virtualenv
@@ -157,10 +254,7 @@ def formula_content(
 
   depends_on "python@3.12"
 
-  resource "typer" do
-    url "https://files.pythonhosted.org/packages/source/t/typer/typer-0.24.1.tar.gz"
-    sha256 "8bf4e81499611d3161106e998fe4d624a83abf8bfda3b99898b4498d0c2f0976"
-  end
+{resources_section}
 
   on_macos do
     on_arm do
@@ -173,7 +267,7 @@ def formula_content(
 
   def install
     venv = virtualenv_create(libexec, "python3.12")
-    venv.pip_install resource("typer")
+{install_resources}
     venv.pip_install buildpath
 
     bin.install_symlink libexec/"bin/envrcctl"
@@ -261,6 +355,7 @@ def main() -> int:
 
     source_sha256 = sha256_file(sdist_path)
     helper_sha256 = sha256_file(helper_archive)
+    dependency_resources = dependency_resource_specs(repo_root)
 
     formula_path = write_formula(
         repo_root,
@@ -270,6 +365,7 @@ def main() -> int:
             helper_sha256=helper_sha256,
             homepage=args.homepage,
             license_name=args.license_name,
+            dependency_resources=dependency_resources,
         ),
         args.formula_dir,
     )
