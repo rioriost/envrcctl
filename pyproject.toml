@@ -2,30 +2,55 @@
 name = "envrcctl"
 version = "0.2.1"
 description = "Manage .envrc with managed blocks and OS-backed secrets."
-readme = "README.md"
+readme = { file = "README.md", content-type = "text/markdown" }
 license = { file = "LICENSE" }
 requires-python = ">=3.14"
+authors = [
+    { name = "Rio Fujita", email = "rio_github@rio.st" },
+]
 dependencies = [
     "typer>=0.24.1",
 ]
 
+[tool.uv.build-backend]
+module-root = "src"
+source-include = [
+    "completions/**",
+]
+
+[project.urls]
+Homepage = "https://github.com/rioriost/envrcctl"
+Issues = "https://github.com/rioriost/envrcctl/issues"
+Repository = "https://github.com/rioriost/envrcctl"
+
 [project.scripts]
 envrcctl = "envrcctl.main:main"
 
-[build-system]
-requires = ["hatchling>=1.24.2"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/envrcctl"]
-include = ["completions/**", "src/envrcctl/envrcctl-macos-auth"]
-
-[tool.hatch.build.targets.sdist]
-include = ["src/envrcctl/**", "completions/**", "scripts/**", "README.md", "LICENSE", "pyproject.toml"]
-
 [project.optional-dependencies]
 test = [
-    "pytest>=9.0.2",
-    "pytest-cov>=7.0.0",
+    "pytest>=9",
+    "pytest-cov>=7",
     "bandit>=1.7.10",
 ]
+
+[dependency-groups]
+dev = [
+    "build>=1.2.2",
+    "twine>=6.1.0",
+    "ruff>=0.12.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.27,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

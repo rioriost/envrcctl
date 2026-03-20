@@ -38,18 +38,12 @@ brew tap rioriost/tap
 brew install envrcctl
 ```
 
-For the next patch release, the Homebrew formula is intended to install a
-prebuilt Apple Silicon macOS authentication helper from a GitHub release
-`tar.gz` asset instead of compiling it at install time.
-
-This Homebrew path is therefore intended for:
+This Homebrew path is intended for:
 
 - Apple Silicon (`arm64`) Macs
 - macOS installs that should not require a full Xcode.app build dependency
 
 Intel Macs are not a target for this Homebrew distribution path.
-
-After release, Homebrew will download the release from GitHub.
 
 Install direnv with Homebrew:
 
@@ -69,62 +63,31 @@ pipx install envrcctl
 uv tool install envrcctl
 ```
 
-### From source (macOS/Linux)
-
-```sh
-git clone <REPO_URL>
-cd envrcctl
-uv sync
-uv run python -m envrcctl.main --help
-```
-
-### Build the macOS auth helper manually (macOS only)
+### About the macOS auth helper (Apple Silicon macOS only)
 
 The macOS device owner authentication flow requires a native helper named
 `envrcctl-macos-auth`.
 
-On Apple Silicon macOS, the Homebrew installation path for the next patch
-release is intended to install a prebuilt helper automatically from a GitHub
-release `tar.gz` asset, so you should not need to compile it yourself in the
-common case.
+Homebrew on Apple Silicon is intended to install this helper automatically, so
+you should not need to build it yourself in the common case.
 
 Manual helper installation is still useful when:
 
-- you are running from source
-- you are developing on this repository
 - you want to place the helper in a custom location
 - you are not using the Apple Silicon Homebrew distribution path
 
-The Homebrew release asset is expected to be named
-`envrcctl-macos-auth-arm64.tar.gz` and to contain an executable named
-`envrcctl-macos-auth`.
-
-If you are building the helper yourself, place the binary at either:
+If you are building the helper yourself, use Apple Silicon (`arm64`) macOS and place the binary at either:
 
 - `src/envrcctl/envrcctl-macos-auth`
 - or a custom path set via `ENVRCCTL_MACOS_AUTH_HELPER`
 
-Example build flow:
+Example build flow on Apple Silicon macOS:
 
 ```sh
 swiftc -O -framework LocalAuthentication -framework Security \
   scripts/macos/envrcctl-macos-auth.swift \
   -o src/envrcctl/envrcctl-macos-auth
 chmod +x src/envrcctl/envrcctl-macos-auth
-```
-
-You can also use the repository build script:
-
-```sh
-sh scripts/build_macos_auth_helper.sh
-```
-
-If you want to write the helper to a custom location, pass the source and output paths explicitly:
-
-```sh
-sh scripts/build_macos_auth_helper.sh \
-  scripts/macos/envrcctl-macos-auth.swift \
-  /usr/local/bin/envrcctl-macos-auth
 ```
 
 If you install the helper elsewhere, set:
@@ -373,12 +336,7 @@ uv run python scripts/generate_completions.py
 - Audit integrity is based on a hash chain and can be checked with `envrcctl audit verify`
 - The tool refuses to write to world-writable `.envrc`
 
-## Development
 
-```sh
-uv sync
-.venv/bin/envrcctl --help
-```
 
 ## Acknowledgements
 

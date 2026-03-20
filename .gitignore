@@ -9,3 +9,6 @@ __pycache__/
 htmlcov/
 .DS_Store
 .envrc
+dist/helper/
+dist/*-arm64.tar.gz
+dist/*-darwin-arm64.tar.gz

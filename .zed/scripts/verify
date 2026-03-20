@@ -26,7 +26,7 @@ for entry in "${status_entries[@]}"; do
   case "$path" in
     *.py|pyproject.toml|requirements.txt) has_python=1 ;;
     *.swift|Package.swift) has_swift=1 ;;
-    native/envrcctl-macos-auth.swift|scripts/macos/envrcctl-macos-auth.swift|scripts/build_macos_auth_helper.sh)
+    scripts/macos/envrcctl-macos-auth.swift|scripts/build_macos_auth_helper.sh)
       has_macos_auth_helper=1
       has_swift=1
       ;;

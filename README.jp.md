@@ -56,45 +56,16 @@ direnvのインストールは以下です。
     uv tool install envrcctl
 ```
 
-### ソースから（macOS/Linux）
+### macOS 認証ヘルパーについて
 
-```sh
-    git clone <REPO_URL>
-    cd envrcctl
-    uv sync
-    uv run python -m envrcctl.main --help
-```
+Apple Silicon (`arm64`) の macOS では、Homebrew で `envrcctl` をインストールすると
+`envrcctl-macos-auth` ヘルパーもあわせて導入される想定です。
 
-### macOS 認証ヘルパーのビルドと配置
+通常は追加作業は不要です。  
+`secret get` / `inject` / `exec` の実行時に helper が見つからない場合のみ、
+インストール方法を確認してください。
 
-macOS で `secret get` / `inject` / `exec` に必要な device owner authentication を使うには、
-`envrcctl-macos-auth` ヘルパーをビルドして `envrcctl` から参照できる場所に配置する必要があります。
-
-既定では、`envrcctl` は Python パッケージと同じディレクトリにある
-`envrcctl-macos-auth` を探します。別の場所に置く場合は
-`ENVRCCTL_MACOS_AUTH_HELPER` 環境変数でパスを指定できます。
-
-例:
-
-```sh
-    swiftc -framework LocalAuthentication -framework Security \
-      scripts/macos/envrcctl-macos-auth.swift \
-      -o src/envrcctl/envrcctl-macos-auth
-```
-
-別の場所に出力する場合:
-
-```sh
-    swiftc -framework LocalAuthentication -framework Security \
-      scripts/macos/envrcctl-macos-auth.swift \
-      -o /usr/local/bin/envrcctl-macos-auth
-```
-
-その場合は `envrcctl` 実行前に以下を設定します。
-
-```sh
-    export ENVRCCTL_MACOS_AUTH_HELPER=/usr/local/bin/envrcctl-macos-auth
-```
+Intel Mac (`x86_64`) は対象外です。
 
 ## クイックスタート
 
@@ -292,13 +263,6 @@ macOS では、`_is_interactive` 相当の対話判定に加えて、Touch ID / 
 - audit record に plaintext の secret value は含まれません
 - audit integrity は hash chain に基づき、`envrcctl audit verify` で検証できます
 - `.envrc` が world-writable の場合は書き込みを拒否します
-
-## 開発
-
-```sh
-    uv sync
-    .venv/bin/envrcctl --help
-```
 
 ## 謝辞
 

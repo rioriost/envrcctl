@@ -11,6 +11,11 @@ if [ "$(uname -s)" != "Darwin" ]; then
   exit 1
 fi
 
+if [ "$(uname -m)" != "arm64" ]; then
+  echo "This helper only supports Apple Silicon (arm64) macOS." >&2
+  exit 1
+fi
+
 if ! command -v swiftc >/dev/null 2>&1; then
   echo "swiftc not found. Install Xcode Command Line Tools first." >&2
   exit 1
@@ -24,7 +29,7 @@ fi
 
 mkdir -p "$(dirname "$OUTPUT_PATH")"
 
-echo "Building macOS auth helper..."
+echo "Building macOS auth helper for Apple Silicon (arm64)..."
 echo "  source: $SWIFT_SOURCE"
 echo "  output: $OUTPUT_PATH"
 
