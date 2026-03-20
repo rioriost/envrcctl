@@ -157,6 +157,11 @@ def formula_content(
 
   depends_on "python@3.12"
 
+  resource "typer" do
+    url "https://files.pythonhosted.org/packages/source/t/typer/typer-0.24.1.tar.gz"
+    sha256 "8bf4e81499611d3161106e998fe4d624a83abf8bfda3b99898b4498d0c2f0976"
+  end
+
   on_macos do
     on_arm do
       resource "envrcctl-macos-auth-arm64" do
@@ -168,6 +173,7 @@ def formula_content(
 
   def install
     venv = virtualenv_create(libexec, "python3.12")
+    venv.pip_install resource("typer")
     venv.pip_install buildpath
 
     bin.install_symlink libexec/"bin/envrcctl"
@@ -185,7 +191,7 @@ def formula_content(
 
   test do
     assert_predicate bin/"envrcctl", :exist?
-    assert_match version.to_s, shell_output("#{bin}/envrcctl --version")
+    assert_match version.to_s, shell_output("#{{bin}}/envrcctl --version")
     if OS.mac? && Hardware::CPU.arm?
       assert_predicate bin/"envrcctl-macos-auth", :exist?
     end
