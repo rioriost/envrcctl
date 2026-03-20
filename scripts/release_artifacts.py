@@ -70,6 +70,24 @@ def dependency_name(requirement: str) -> str:
     return normalize_package_name(base)
 
 
+def package_dependencies(block: str) -> list[str]:
+    deps_match = re.search(r"dependencies = \[(.*?)\]\n", block, re.DOTALL)
+    if not deps_match:
+        return []
+
+    dependencies: list[str] = []
+    for match in re.finditer(r'\{ name = "([^"]+)"(?:, marker = "([^"]+)")?', deps_match.group(1)):
+        name = normalize_package_name(match.group(1))
+        marker = match.group(2)
+        if marker and "win32" in marker.lower():
+            continue
+        if marker and "windows" in marker.lower():
+            continue
+        dependencies.append(name)
+
+    return dependencies
+
+
 def uv_lock_package_block(lock_text: str, package_name: str) -> str:
     normalized = normalize_package_name(package_name)
     current: list[str] = []
@@ -111,10 +129,24 @@ def extract_sdist_url_and_sha(block: str, package_name: str) -> tuple[str, str]:
 
 def dependency_resource_specs(repo_root: Path) -> list[tuple[str, str, str]]:
     lock_text = (repo_root / "uv.lock").read_text(encoding="utf-8")
-    specs: list[tuple[str, str, str]] = []
+    ordered_names: list[str] = []
+    seen: set[str] = set()
+    queue = [dependency_name(req) for req in project_dependencies(repo_root / "pyproject.toml")]
 
-    for requirement in project_dependencies(repo_root / "pyproject.toml"):
-        package_name = dependency_name(requirement)
+    while queue:
+        package_name = normalize_package_name(queue.pop(0))
+        if package_name in seen:
+            continue
+        seen.add(package_name)
+        ordered_names.append(package_name)
+
+        block = uv_lock_package_block(lock_text, package_name)
+        for dependency in package_dependencies(block):
+            if dependency not in seen and dependency not in queue:
+                queue.append(dependency)
+
+    specs: list[tuple[str, str, str]] = []
+    for package_name in ordered_names:
         block = uv_lock_package_block(lock_text, package_name)
         url, sha256 = extract_sdist_url_and_sha(block, package_name)
         specs.append((package_name, url, sha256))
