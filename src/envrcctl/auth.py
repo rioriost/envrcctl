@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -19,6 +20,11 @@ def _helper_path() -> Path:
     configured = os.getenv(_HELPER_ENV_VAR)
     if configured:
         return Path(configured).expanduser()
+
+    helper_on_path = shutil.which(_DEFAULT_HELPER_BASENAME)
+    if helper_on_path:
+        return Path(helper_on_path)
+
     return _default_helper_path()
 
 
