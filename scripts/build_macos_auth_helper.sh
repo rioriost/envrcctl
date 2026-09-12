@@ -33,7 +33,9 @@ echo "Building macOS auth helper for Apple Silicon (arm64)..."
 echo "  source: $SWIFT_SOURCE"
 echo "  output: $OUTPUT_PATH"
 
-swiftc \
+xcrun --sdk macosx swiftc \
+  -sdk "$(xcrun --sdk macosx --show-sdk-path)" \
+  -target "arm64-apple-macosx${MACOSX_DEPLOYMENT_TARGET:-26.0}" \
   -O \
   -framework LocalAuthentication \
   -framework Security \
