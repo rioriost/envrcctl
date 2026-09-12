@@ -1,6 +1,6 @@
 [project]
 name = "envrcctl"
-version = "0.3.0"
+version = "0.3.1"
 description = "Manage .envrc with managed blocks and OS-backed secrets."
 readme = { file = "README.md", content-type = "text/markdown" }
 license = "MIT"
