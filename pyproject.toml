@@ -1,6 +1,6 @@
 [project]
 name = "envrcctl"
-version = "0.3.1"
+version = "0.3.2"
 description = "Manage .envrc with managed blocks and OS-backed secrets."
 readme = { file = "README.md", content-type = "text/markdown" }
 license = "MIT"
@@ -15,6 +15,7 @@ dependencies = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/envrcctl"]
+exclude = ["src/envrcctl/envrcctl-macos-auth"]
 
 [tool.hatch.build.targets.sdist]
 include = [

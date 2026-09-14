@@ -3,72 +3,80 @@ class Envrcctl < Formula
 
   desc "Manage .envrc with managed blocks and OS-backed secrets"
   homepage "https://github.com/rioriost/envrcctl"
-  url "https://github.com/rioriost/envrcctl/releases/download/0.3.1/envrcctl-0.3.1.tar.gz"
-  sha256 "abc91553fd389131e56d53f0e5df0d189b5404cf9a16cd07a2aa51e503a0cec5"
+  url "https://github.com/rioriost/envrcctl/releases/download/0.3.2/envrcctl-0.3.2.tar.gz"
+  sha256 "b539dbfb2cf6874b2f97e2bfa12c90835d209bcb957dab22038c95bf94ff4eb8"
   license "MIT"
 
   depends_on "python@3.14"
 
-  resource "click" do
-    url "https://ms-feed-25.pkgs.visualstudio.com/6f084628-a36d-42cb-934d-057357e379dc/_packaging/49d7402f-07bb-4b18-a9ce-086e6e98a554/pypi/download/click/8.4.2/click-8.4.2.tar.gz"
-    sha256 "9a6cea6e60b17ebe0a44c5cc636d94f09bd66142c1cd7d8b4cd731c4917a15f6"
-  end
-
-  resource "typer" do
-    url "https://ms-feed-25.pkgs.visualstudio.com/6f084628-a36d-42cb-934d-057357e379dc/_packaging/49d7402f-07bb-4b18-a9ce-086e6e98a554/pypi/download/typer/0.26.8/typer-0.26.8.tar.gz"
-    sha256 "c244a6bd558886fe3f8780efb6bdd28bb9aff005a94eedebaa5cb32926fe2f7e"
-  end
-
-  resource "annotated-doc" do
-    url "https://ms-feed-25.pkgs.visualstudio.com/6f084628-a36d-42cb-934d-057357e379dc/_packaging/49d7402f-07bb-4b18-a9ce-086e6e98a554/pypi/download/annotated-doc/0.0.4/annotated_doc-0.0.4.tar.gz"
-    sha256 "fbcda96e87e9c92ad167c2e53839e57503ecfda18804ea28102353485033faa4"
-  end
-
-  resource "rich" do
-    url "https://ms-feed-25.pkgs.visualstudio.com/6f084628-a36d-42cb-934d-057357e379dc/_packaging/49d7402f-07bb-4b18-a9ce-086e6e98a554/pypi/download/rich/15/rich-15.0.0.tar.gz"
-    sha256 "edd07a4824c6b40189fb7ac9bc4c52536e9780fbbfbddf6f1e2502c31b068c36"
-  end
-
-  resource "shellingham" do
-    url "https://ms-feed-25.pkgs.visualstudio.com/6f084628-a36d-42cb-934d-057357e379dc/_packaging/49d7402f-07bb-4b18-a9ce-086e6e98a554/pypi/download/shellingham/1.5.4/shellingham-1.5.4.tar.gz"
-    sha256 "8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de"
-  end
-
-  resource "markdown-it-py" do
-    url "https://ms-feed-25.pkgs.visualstudio.com/6f084628-a36d-42cb-934d-057357e379dc/_packaging/49d7402f-07bb-4b18-a9ce-086e6e98a554/pypi/download/markdown-it-py/4.2/markdown_it_py-4.2.0.tar.gz"
-    sha256 "04a21681d6fbb623de53f6f364d352309d4094dd4194040a10fd51833e418d49"
-  end
-
-  resource "pygments" do
-    url "https://ms-feed-25.pkgs.visualstudio.com/6f084628-a36d-42cb-934d-057357e379dc/_packaging/49d7402f-07bb-4b18-a9ce-086e6e98a554/pypi/download/pygments/2.20/pygments-2.20.0.tar.gz"
-    sha256 "6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f"
-  end
-
-  resource "mdurl" do
-    url "https://ms-feed-25.pkgs.visualstudio.com/6f084628-a36d-42cb-934d-057357e379dc/_packaging/49d7402f-07bb-4b18-a9ce-086e6e98a554/pypi/download/mdurl/0.1.2/mdurl-0.1.2.tar.gz"
-    sha256 "bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba"
-  end
-
   on_macos do
     on_arm do
       resource "envrcctl-macos-auth-arm64" do
-        url "https://github.com/rioriost/envrcctl/releases/download/0.3.1/envrcctl-macos-auth-0.3.1-arm64.tar.gz"
-        sha256 "010ffe06d9859d74769c0938e4790f40efeb10d59c805bedc6f3aad65521d574"
+        url "https://github.com/rioriost/envrcctl/releases/download/0.3.2/envrcctl-macos-auth-0.3.2-arm64.tar.gz"
+        sha256 "e2b94b933f851ca297a4cdb6e2c079aaf14e0680efb82c08a5cabef38181dfb6"
       end
     end
   end
 
+  resource "click" do
+    url "https://ms-feed-25.pkgs.visualstudio.com/6f084628-a36d-42cb-934d-057357e379dc/_packaging/49d7402f-07bb-4b18-a9ce-086e6e98a554/pypi/download/click/8.4.2/click-8.4.2-py3-none-any.whl", using: :nounzip
+    sha256 "e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76"
+  end
+
+  resource "typer" do
+    url "https://ms-feed-25.pkgs.visualstudio.com/6f084628-a36d-42cb-934d-057357e379dc/_packaging/49d7402f-07bb-4b18-a9ce-086e6e98a554/pypi/download/typer/0.26.8/typer-0.26.8-py3-none-any.whl", using: :nounzip
+    sha256 "3512ca79ac5c11113414b36e80281b872884477722440691c89d1112e321a49c"
+  end
+
+  resource "annotated-doc" do
+    url "https://ms-feed-25.pkgs.visualstudio.com/6f084628-a36d-42cb-934d-057357e379dc/_packaging/49d7402f-07bb-4b18-a9ce-086e6e98a554/pypi/download/annotated-doc/0.0.4/annotated_doc-0.0.4-py3-none-any.whl", using: :nounzip
+    sha256 "571ac1dc6991c450b25a9c2d84a3705e2ae7a53467b5d111c24fa8baabbed320"
+  end
+
+  resource "rich" do
+    url "https://ms-feed-25.pkgs.visualstudio.com/6f084628-a36d-42cb-934d-057357e379dc/_packaging/49d7402f-07bb-4b18-a9ce-086e6e98a554/pypi/download/rich/15/rich-15.0.0-py3-none-any.whl", using: :nounzip
+    sha256 "33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb"
+  end
+
+  resource "shellingham" do
+    url "https://ms-feed-25.pkgs.visualstudio.com/6f084628-a36d-42cb-934d-057357e379dc/_packaging/49d7402f-07bb-4b18-a9ce-086e6e98a554/pypi/download/shellingham/1.5.4/shellingham-1.5.4-py2.py3-none-any.whl", using: :nounzip
+    sha256 "7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686"
+  end
+
+  resource "markdown-it-py" do
+    url "https://ms-feed-25.pkgs.visualstudio.com/6f084628-a36d-42cb-934d-057357e379dc/_packaging/49d7402f-07bb-4b18-a9ce-086e6e98a554/pypi/download/markdown-it-py/4.2/markdown_it_py-4.2.0-py3-none-any.whl", using: :nounzip
+    sha256 "9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a"
+  end
+
+  resource "pygments" do
+    url "https://ms-feed-25.pkgs.visualstudio.com/6f084628-a36d-42cb-934d-057357e379dc/_packaging/49d7402f-07bb-4b18-a9ce-086e6e98a554/pypi/download/pygments/2.20/pygments-2.20.0-py3-none-any.whl", using: :nounzip
+    sha256 "81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176"
+  end
+
+  resource "mdurl" do
+    url "https://ms-feed-25.pkgs.visualstudio.com/6f084628-a36d-42cb-934d-057357e379dc/_packaging/49d7402f-07bb-4b18-a9ce-086e6e98a554/pypi/download/mdurl/0.1.2/mdurl-0.1.2-py3-none-any.whl", using: :nounzip
+    sha256 "84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8"
+  end
+
+  resource "envrcctl-wheel" do
+    url "https://github.com/rioriost/envrcctl/releases/download/0.3.2/envrcctl-0.3.2-py3-none-any.whl", using: :nounzip
+    sha256 "c3e389259385025e504eb668edceeed663acadc7fc8dc563f3d504263d6310c3"
+  end
+
   def install
+    # All Python packages are checksummed wheels fetched by Homebrew in advance.
+    ENV["PIP_NO_INDEX"] = "1"
+    ENV["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
     venv = virtualenv_create(libexec, "python3.14")
-    venv.pip_install resource("click")
-    venv.pip_install resource("typer")
-    venv.pip_install resource("annotated-doc")
-    venv.pip_install resource("rich")
-    venv.pip_install resource("shellingham")
-    venv.pip_install resource("markdown-it-py")
-    venv.pip_install resource("pygments")
-    venv.pip_install resource("mdurl")
-    venv.pip_install buildpath
+    venv.pip_install resource("click"), build_isolation: false
+    venv.pip_install resource("typer"), build_isolation: false
+    venv.pip_install resource("annotated-doc"), build_isolation: false
+    venv.pip_install resource("rich"), build_isolation: false
+    venv.pip_install resource("shellingham"), build_isolation: false
+    venv.pip_install resource("markdown-it-py"), build_isolation: false
+    venv.pip_install resource("pygments"), build_isolation: false
+    venv.pip_install resource("mdurl"), build_isolation: false
+    venv.pip_install resource("envrcctl-wheel"), build_isolation: false
 
     bin.install_symlink libexec/"bin/envrcctl"
 
@@ -84,10 +92,10 @@ class Envrcctl < Formula
   end
 
   test do
-    assert_predicate bin/"envrcctl", :exist?
+    assert_path_exists bin/"envrcctl"
     assert_match "Manage .envrc", shell_output("#{bin}/envrcctl --help")
     if OS.mac? && Hardware::CPU.arm?
-      assert_predicate bin/"envrcctl-macos-auth", :exist?
+      assert_path_exists bin/"envrcctl-macos-auth"
     end
   end
 end

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import re
 import shutil
 import subprocess
@@ -116,15 +117,15 @@ def uv_lock_package_block(lock_text: str, package_name: str) -> str:
     raise RuntimeError(f"Package {package_name!r} not found in uv.lock")
 
 
-def extract_sdist_url_and_sha(block: str, package_name: str) -> tuple[str, str]:
-    sdist_match = re.search(
-        r'sdist = \{ url = "([^"]+\.tar\.gz)", hash = "sha256:([0-9a-f]+)"',
+def extract_wheel_url_and_sha(block: str, package_name: str) -> tuple[str, str]:
+    wheels = re.findall(
+        r'\{ url = "([^"]+-(?:py3|py2\.py3)-none-any\.whl)", hash = "sha256:([0-9a-f]{64})"',
         block,
     )
-    if sdist_match:
-        return sdist_match.group(1), sdist_match.group(2)
+    if len(wheels) == 1:
+        return wheels[0]
 
-    raise RuntimeError(f"Could not find sdist URL and sha256 for {package_name!r} in uv.lock")
+    raise RuntimeError(f"Expected one locked universal Python wheel for {package_name!r}")
 
 
 def dependency_resource_specs(repo_root: Path) -> list[tuple[str, str, str]]:
@@ -148,7 +149,7 @@ def dependency_resource_specs(repo_root: Path) -> list[tuple[str, str, str]]:
     specs: list[tuple[str, str, str]] = []
     for package_name in ordered_names:
         block = uv_lock_package_block(lock_text, package_name)
-        url, sha256 = extract_sdist_url_and_sha(block, package_name)
+        url, sha256 = extract_wheel_url_and_sha(block, package_name)
         specs.append((package_name, url, sha256))
 
     return specs
@@ -162,7 +163,7 @@ def require_command(name: str) -> None:
 def ensure_macos_arm64() -> None:
     if sys.platform != "darwin":
         raise RuntimeError("This script must run on macOS.")
-    machine = getattr(__import__("os"), "uname")().machine
+    machine = os.uname().machine
     if machine != "arm64":
         raise RuntimeError("This script only supports Apple Silicon (arm64) macOS.")
 
@@ -252,6 +253,7 @@ def formula_content(
     *,
     version: str,
     source_sha256: str,
+    wheel_sha256: str,
     helper_sha256: str,
     homepage: str,
     license_name: str,
@@ -266,11 +268,13 @@ def formula_content(
     for package_name, package_url, package_sha256 in dependency_resources:
         resource_blocks.append(
             f"""  resource "{package_name}" do
-    url "{package_url}"
+    url "{package_url}", using: :nounzip
     sha256 "{package_sha256}"
   end"""
         )
-        install_lines.append(f'    venv.pip_install resource("{package_name}")')
+        install_lines.append(
+            f'    venv.pip_install resource("{package_name}"), build_isolation: false'
+        )
 
     resources_section = "\n\n".join(resource_blocks)
     install_resources = "\n".join(install_lines)
@@ -286,8 +290,6 @@ def formula_content(
 
   depends_on "python@3.14"
 
-{resources_section}
-
   on_macos do
     on_arm do
       resource "envrcctl-macos-auth-arm64" do
@@ -297,10 +299,20 @@ def formula_content(
     end
   end
 
+{resources_section}
+
+  resource "envrcctl-wheel" do
+    url "{release_base}/envrcctl-{version}-py3-none-any.whl", using: :nounzip
+    sha256 "{wheel_sha256}"
+  end
+
   def install
+    # All Python packages are checksummed wheels fetched by Homebrew in advance.
+    ENV["PIP_NO_INDEX"] = "1"
+    ENV["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
     venv = virtualenv_create(libexec, "python3.14")
 {install_resources}
-    venv.pip_install buildpath
+    venv.pip_install resource("envrcctl-wheel"), build_isolation: false
 
     bin.install_symlink libexec/"bin/envrcctl"
 
@@ -316,10 +328,10 @@ def formula_content(
   end
 
   test do
-    assert_predicate bin/"envrcctl", :exist?
+    assert_path_exists bin/"envrcctl"
     assert_match "Manage .envrc", shell_output("#{{bin}}/envrcctl --help")
     if OS.mac? && Hardware::CPU.arm?
-      assert_predicate bin/"envrcctl-macos-auth", :exist?
+      assert_path_exists bin/"envrcctl-macos-auth"
     end
   end
 end
@@ -394,6 +406,7 @@ def main() -> int:
         formula_content(
             version=version,
             source_sha256=source_sha256,
+            wheel_sha256=sha256_file(wheel_path),
             helper_sha256=helper_sha256,
             homepage=args.homepage,
             license_name=args.license_name,
