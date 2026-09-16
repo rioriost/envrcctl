@@ -123,9 +123,10 @@ notary-profile = "YOUR_EXISTING_KEYCHAIN_PROFILE"
 ```
 
 These values are nonsecret identifiers/paths, never passwords, private keys, or
-API tokens. The repository already selects its Developer ID identity; set the
-profile to its **existing name**, not a guessed label. Registration or password
-extraction is not part of a release build.
+API tokens. This repository selects its Developer ID identity and the existing
+`NOTARY_ENVRCCTL` profile. Other release operators must select their own existing
+profile, not a guessed label. Registration or password extraction is not part
+of a release build.
 
 Resolution is deterministic, in this order:
 
