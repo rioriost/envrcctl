@@ -61,6 +61,11 @@ build-backend = "hatchling.build"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 
+[tool.envrcctl.release]
+signing-identity = "Developer ID Application: Ryo Fujita (23889H77KX)"
+# Set notary-profile to the existing notarytool Keychain profile name.
+# This is an alias, not a password. Credentials remain in Keychain.
+
 [tool.ruff]
 line-length = 100
 target-version = "py314"

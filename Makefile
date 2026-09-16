@@ -4,13 +4,22 @@ SHELL := /bin/sh
 .NOTPARALLEL:
 
 UV ?= uv
-PYTHON ?= python3
+PYTHON ?= .venv/bin/python
 RELEASE_ARGS ?=
 
-.PHONY: release-artifacts sync completions dist helper helper-archive formula
+.PHONY: release-artifacts release-preflight release-check candidate sync completions dist helper helper-archive formula
 
 release-artifacts:
 	$(PYTHON) scripts/release_artifacts.py --uv "$(UV)" $(RELEASE_ARGS)
+
+release-preflight:
+	$(PYTHON) scripts/release_artifacts.py --preflight $(RELEASE_ARGS)
+
+release-check:
+	$(PYTHON) scripts/release_artifacts.py --verify-release
+
+candidate:
+	$(PYTHON) scripts/release_artifacts.py --uv "$(UV)" --candidate $(RELEASE_ARGS)
 
 sync:
 	$(UV) sync --locked --extra test --group dev

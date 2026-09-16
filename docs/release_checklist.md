@@ -36,6 +36,7 @@
 - [ ] Regenerate shell completions with `uv run python scripts/generate_completions.py` when CLI changes.
 
 ## Release Steps
+- [ ] Run `make release-check`; require matching provenance and an Accepted notarization receipt.
 - [ ] Tag the release in git (annotated tag).
 - [ ] Publish artifacts to the chosen distribution channel.
 - [ ] Verify Homebrew formula (if applicable) references correct URL/SHA256.
@@ -51,15 +52,20 @@ Apple Silicon macOS helper. It does not impose that helper requirement on Linux.
 
 ```sh
 uv sync --locked --extra test --group dev
-make PYTHON=.venv/bin/python
+make release-preflight
+make
 # Equivalent: .venv/bin/python scripts/release_artifacts.py
 ```
 
 The default (also selectable explicitly with `--build`) always rebuilds, even
 when files for the same version already exist.
-One Python process owns sync → completions → Python build/validation → helper
-build/metadata check → optional signing/notarization → helper archive/validation
-→ provenance → formula. `make -j` and inherited parallel `MAKEFLAGS` cannot
+Make uses `.venv/bin/python` by default so credential preflight uses the project's
+required Python without implicitly syncing dependencies first; `PYTHON` remains
+an explicit override.
+One Python process owns credential preflight → sync → completions → Python
+build/validation → helper build/metadata check → signing/notarization → helper
+archive/validation → provenance/acceptance receipt → formula.
+`make -j` and inherited parallel `MAKEFLAGS` cannot
 reorder those stages. No target launches an automatic competing build.
 
 Staging directories are created **inside `dist/`**, not the system temporary
@@ -99,6 +105,57 @@ recompile the checkout helper independently: use the exact archived signed bytes
 verify its Developer ID signature and harmless `--help`, then run `--formula-only`
 to recheck provenance. The Swift source and build script remain fingerprinted.
 
+### Persistent Keychain profile selection
+
+Keychain stores the credentials. `NOTARY_PROFILE` is only the **name used to
+select a stored notarytool profile**; Keychain does not automatically export that
+environment variable to a new shell or coding-agent process. No environment
+variable being set is not evidence that credentials are absent.
+
+Configure the existing profile name once in `pyproject.toml`:
+
+```toml
+[tool.envrcctl.release]
+signing-identity = "Developer ID Application: YOUR NAME (TEAMID)"
+notary-profile = "YOUR_EXISTING_KEYCHAIN_PROFILE"
+# Only when the profile uses a non-default Keychain:
+# notary-keychain = "~/Library/Keychains/release.keychain-db"
+```
+
+These values are nonsecret identifiers/paths, never passwords, private keys, or
+API tokens. The repository already selects its Developer ID identity; set the
+profile to its **existing name**, not a guessed label. Registration or password
+extraction is not part of a release build.
+
+Resolution is deterministic, in this order:
+
+1. `--signing-identity`, `--notary-profile`, `--notary-keychain`.
+2. `SIGNING_IDENTITY`, `NOTARY_PROFILE`, `NOTARY_KEYCHAIN`.
+3. `[tool.envrcctl.release]` in `pyproject.toml`.
+
+An explicitly empty/invalid value fails instead of silently selecting a
+different profile. Names containing spaces or dots are passed as one argument.
+Relative Keychain paths are resolved from the repository root.
+
+`notarytool` has no public profile-list command. Generic Keychain metadata
+queries may not expose every profile accessible to Apple's tool, and an empty
+metadata result must not be treated as proof that no credentials are saved.
+The authoritative check is performed by **notarytool itself**, using the
+selected profile and optional Keychain:
+
+```sh
+make release-preflight PYTHON=.venv/bin/python
+# A one-off override, without changing or extracting stored credentials:
+NOTARY_PROFILE="EXISTING_PROFILE" make release-preflight PYTHON=.venv/bin/python
+```
+
+Preflight validates the selected Developer ID identity and executes
+`notarytool history --keychain-profile ... --output-format json`. It runs before
+dependency sync, compilation, staging, or replacement of existing artifacts.
+Missing selection, inaccessible/invalid credentials, and service/time-out failures
+are explicit errors. There is no fallback to another profile or to an unsigned
+release.
+
 ### Signed and notarized release build
 
 The [0.3.2 validation record](releases/0.3.2-validation.md) documents a
@@ -109,67 +166,54 @@ Before invoking these commands, an authorized release operator must have a
 valid **Developer ID Application** identity and its private key in their
 Keychain, plus an existing `notarytool` Keychain credential profile. Discover
 available signing identities with `security find-identity -v -p codesigning`;
-check the chosen profile using `xcrun notarytool history --keychain-profile
-"PROFILE"`. Do not store credentials in the repository or command arguments.
+validate the configured profile using `make release-preflight`. Do not store
+credentials in the repository or command arguments.
 
 ```sh
-MACOSX_DEPLOYMENT_TARGET=26.0 .venv/bin/python scripts/release_artifacts.py --build \
-  --signing-identity "Developer ID Application: YOUR NAME (TEAMID)" \
-  --notary-profile "YOUR_EXISTING_KEYCHAIN_PROFILE"
+MACOSX_DEPLOYMENT_TARGET=26.0 make release-artifacts PYTHON=.venv/bin/python
+make release-check PYTHON=.venv/bin/python
 ```
 
 The generator freshly builds a staged helper, signs with hardened runtime and
 timestamp, verifies its signature, submits a ZIP via `notarytool --wait`, and
 requires JSON status `Accepted` **before** producing the final helper tarball,
-hashes, provenance and formula. Record the notarization ID from its output in
-release validation notes. A standalone Mach-O helper cannot be stapled; preserve
+hashes, provenance, `dist/notarization.json`, and formula. The acceptance receipt
+records the submission ID and all three artifact hashes. Record that ID in
+release validation notes. `make release-check` rejects missing, non-Accepted,
+or mismatched receipts as well as stale provenance. A standalone Mach-O helper
+cannot be stapled; preserve
 the accepted notarization result and exact signed bytes. Do not rebuild or
-re-sign the helper after final hashes are generated. Running the default without
-signing options is for development/validation, not for publishing a signed release.
+re-sign the helper after final hashes are generated. The default is a production
+build and cannot silently omit signing or notarization.
 These commands do not commit, tag, push, upload release assets or publish packages.
 
-### Signed candidate when notarization credentials are unavailable
+### Explicit private candidates
 
-There is no configured/default notarytool profile in this repository. Do not
-guess profile labels, inspect secret tokens, or publish an unnotarized helper.
-A private signed candidate can be built with `--build --signing-identity` and
-**without** `--notary-profile`. The provenance file records input/artifact hashes;
-it is **not** a signing certificate or a notarization receipt. Keep the successful
-signature-verification log separately, and do not treat it as Apple approval.
-
-Once an authorized operator supplies an existing Keychain profile, notarize the
-already-signed helper without rebuilding, re-signing, or replacing any artifact:
+Development builds must opt in to skipping notarization:
 
 ```sh
-(
-  set -eu
-  : "${NOTARY_PROFILE:?Supply an existing authorized notarytool Keychain profile}"
-  .venv/bin/python scripts/release_artifacts.py --formula-only
-  VERSION=$(.venv/bin/python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
-  mkdir .notary-stage
-  trap 'status=$?; trap - 0; rm -rf .notary-stage || :; exit "$status"' 0
-  tar -xzf "dist/envrcctl-macos-auth-$VERSION-arm64.tar.gz" -C .notary-stage
-  codesign --verify --strict --verbose=2 .notary-stage/envrcctl-macos-auth
-  codesign --display --verbose=4 .notary-stage/envrcctl-macos-auth \
-    2> "dist/helper-signature-$VERSION.txt"
-  ditto -c -k --keepParent .notary-stage/envrcctl-macos-auth .notary-stage/helper.zip
-  xcrun notarytool submit .notary-stage/helper.zip \
-    --keychain-profile "$NOTARY_PROFILE" --wait --output-format json \
-    > "dist/helper-notarization-$VERSION.json"
-  .venv/bin/python -c 'import json, sys; result = json.load(open(sys.argv[1])); sys.exit("Notarization not accepted") if result.get("status") != "Accepted" else print(result["id"])' \
-    "dist/helper-notarization-$VERSION.json"
-  .venv/bin/python scripts/release_artifacts.py --formula-only
-)
+make candidate PYTHON=.venv/bin/python
+# Optionally sign a private candidate:
+.venv/bin/python scripts/release_artifacts.py --candidate \
+  --signing-identity "Developer ID Application: YOUR NAME (TEAMID)"
 ```
 
-The first provenance check validates the exact archive members before extraction.
-Notarization applies to the embedded signed helper bytes; the ZIP is only a
-submission container. The original tarball, wheel, sdist, formula hashes and
-provenance remain unchanged. Preserve the separate signature metadata,
-notarization JSON with status `Accepted`, and release artifact checksums together
-in release validation records. No valid profile means the candidate remains
-private and publication stays blocked. Do not rerun `--build` merely to notarize
-an existing candidate.
+Candidate mode never uses a notarization profile, even if one is configured.
+It ignores the repository's signing default; signing a candidate requires an
+explicit option or `SIGNING_IDENTITY`. Candidates carry hash provenance but
+**no acceptance receipt**, and `make release-check` rejects them. Successful
+partial/candidate builds remove any stale acceptance receipt.
+
+After profile preflight succeeds, run the full production pipeline. It produces
+new signed/notarized artifacts and new checksums; never mix files from different
+builds. The older `1e83e91` private candidate predates this policy and must be
+rebuilt after the pipeline/configuration changes. Do not manually manufacture
+an acceptance receipt or edit provenance to bypass the publication check.
+
+The local provenance/receipt files prevent accidental publication of stale or
+unnotarized outputs; they do not defend against someone deliberately rewriting
+the entire local store. Only an actual Apple `Accepted` result may produce the
+receipt in this workflow.
 
 ### Isolated release/completion tests
 

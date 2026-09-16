@@ -11,12 +11,144 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import tomllib
 import zipfile
 from pathlib import Path
 
 HELPER_NAME = "envrcctl-macos-auth"
 MINIMUM_MACOS = "26.0"
 PROVENANCE_NAME = "release-provenance.json"
+NOTARIZATION_NAME = "notarization.json"
+
+
+def release_settings(repo_root: Path) -> dict[str, str]:
+    with (repo_root / "pyproject.toml").open("rb") as stream:
+        table = tomllib.load(stream)
+    for key in ("tool", "envrcctl", "release"):
+        table = table.get(key, {})
+        if not isinstance(table, dict):
+            raise RuntimeError("[tool.envrcctl.release] must be a TOML table")
+    supported = {"signing-identity", "notary-profile", "notary-keychain"}
+    if table.keys() - supported:
+        raise RuntimeError("Unknown setting in [tool.envrcctl.release]")
+    for key, value in table.items():
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+            or any(ord(char) < 32 or ord(char) == 127 for char in value)
+        ):
+            raise RuntimeError(f"Release setting {key} must be a nonempty single-line string")
+    return table
+
+
+def resolve_credentials(repo_root: Path, args: argparse.Namespace) -> None:
+    settings = release_settings(repo_root)
+    for attribute, environment in (
+        ("signing_identity", "SIGNING_IDENTITY"),
+        ("notary_profile", "NOTARY_PROFILE"),
+        ("notary_keychain", "NOTARY_KEYCHAIN"),
+    ):
+        if args.candidate and attribute.startswith("notary_"):
+            setattr(args, attribute, None)
+            continue
+        value = getattr(args, attribute)
+        source = "command line"
+        if value is None:
+            if environment in os.environ:
+                value, source = os.environ[environment], environment
+            elif not args.candidate:
+                value = settings.get(attribute.replace("_", "-"))
+                source = "pyproject.toml"
+        if value is not None:
+            if not value.strip() or any(ord(char) < 32 or ord(char) == 127 for char in value):
+                raise RuntimeError(f"{source}: {attribute} must be a nonempty single-line string")
+            if attribute == "notary_keychain":
+                path = Path(value).expanduser()
+                value = str(path if path.is_absolute() else repo_root / path)
+            setattr(args, attribute, value)
+            print(f"Selected {attribute} from {source}: {value}")
+
+
+def keychain_arguments(keychain: str | None) -> list[str]:
+    return ["--keychain", keychain] if keychain else []
+
+
+def credential_command(cmd: list[str], repo_root: Path, description: str) -> str:
+    try:
+        result = subprocess.run(
+            cmd, cwd=repo_root, capture_output=True, text=True, check=False, timeout=60
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"{description} could not run ({type(exc).__name__})") from None
+    if result.returncode:
+        raise RuntimeError(
+            f"{description} failed (exit {result.returncode}). "
+            "Check the selected identity/profile, Keychain access and Apple service availability. "
+            "An inaccessible selected profile does not mean no credentials are stored."
+        )
+    return result.stdout
+
+
+def preflight_credentials(repo_root: Path, args: argparse.Namespace) -> None:
+    if not args.candidate and not args.notary_profile:
+        raise RuntimeError(
+            "No notarization profile is selected. Credentials may already exist in Keychain. "
+            "Set [tool.envrcctl.release].notary-profile in pyproject.toml, NOTARY_PROFILE, "
+            "or --notary-profile to the existing profile name. "
+            "Use --candidate only for a private, unnotarized build."
+        )
+    if not args.signing_identity:
+        if args.candidate:
+            return
+        raise RuntimeError(
+            "No signing identity is selected. Set [tool.envrcctl.release].signing-identity, "
+            "SIGNING_IDENTITY, or --signing-identity."
+        )
+    identities = credential_command(
+        ["/usr/bin/security", "find-identity", "-v", "-p", "codesigning"],
+        repo_root,
+        "Developer ID identity preflight",
+    )
+    available = re.findall(
+        r'^\s*\d+\)\s+([A-Fa-f0-9]{40})\s+"(Developer ID Application: [^"]+)"\s*$',
+        identities,
+        re.MULTILINE,
+    )
+    matches = [
+        fingerprint
+        for fingerprint, name in available
+        if args.signing_identity == name or args.signing_identity.upper() == fingerprint.upper()
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(
+            "The selected signing identity must match one valid Developer ID identity"
+        )
+    if args.candidate:
+        print(
+            "Private candidate: signing identity verified; notarization is intentionally disabled."
+        )
+        return
+    output = credential_command(
+        [
+            "xcrun",
+            "notarytool",
+            "history",
+            "--keychain-profile",
+            args.notary_profile,
+            *keychain_arguments(args.notary_keychain),
+            "--output-format",
+            "json",
+        ],
+        repo_root,
+        "Notarization profile preflight",
+    )
+    try:
+        response = json.loads(output)
+    except json.JSONDecodeError:
+        raise RuntimeError("Notarization preflight returned invalid JSON") from None
+    if not isinstance(response, dict) or not isinstance(response.get("history"), list):
+        raise RuntimeError("Notarization preflight returned an invalid history response")
+    print("Release credential preflight: OK (notarytool validated the stored profile)")
 
 
 def run(cmd: list[str], *, cwd: Path) -> None:
@@ -290,7 +422,8 @@ def sign_helper(
     helper: Path,
     identity: str | None,
     notary_profile: str | None,
-) -> None:
+    notary_keychain: str | None = None,
+) -> dict[str, str] | None:
     if identity:
         run(
             [
@@ -307,6 +440,8 @@ def sign_helper(
         )
         run(["codesign", "--verify", "--strict", "--verbose=2", str(helper)], cwd=repo_root)
     if notary_profile:
+        if not identity:
+            raise RuntimeError("Notarization requires a Developer ID signing identity")
         submission = helper.parent / "helper-notarization.zip"
         run(
             ["ditto", "-c", "-k", "--keepParent", str(helper), str(submission)],
@@ -320,6 +455,7 @@ def sign_helper(
                 str(submission),
                 "--keychain-profile",
                 notary_profile,
+                *keychain_arguments(notary_keychain),
                 "--wait",
                 "--output-format",
                 "json",
@@ -330,9 +466,30 @@ def sign_helper(
             text=True,
         )
         response = json.loads(result.stdout)
+        if not isinstance(response, dict):
+            raise RuntimeError("Helper notarization returned an invalid response")
+        submission_id = response.get("id")
         if response.get("status") != "Accepted":
-            raise RuntimeError(f"Helper notarization was not accepted: {result.stdout}")
-        print(f"Helper notarization accepted: {response.get('id')}")
+            safe_id = (
+                submission_id
+                if isinstance(submission_id, str)
+                and re.fullmatch(r"[A-Za-z0-9-]{1,100}", submission_id)
+                else "unavailable"
+            )
+            raise RuntimeError(
+                f"Helper notarization was not accepted (submission: {safe_id}). "
+                "Inspect it with notarytool info/log using the selected profile."
+            )
+        if not isinstance(submission_id, str) or not submission_id:
+            raise RuntimeError("Accepted notarization response is missing its submission ID")
+        print(f"Helper notarization accepted: {submission_id}")
+        return {
+            "status": "Accepted",
+            "submission_id": submission_id,
+            "profile": notary_profile,
+            "signing_identity": identity,
+        }
+    return None
 
 
 def validate_helper_archive(archive: Path, expected_sha256: str | None = None) -> None:
@@ -470,6 +627,57 @@ def verify_provenance(repo_root: Path, version: str) -> tuple[Path, Path, Path]:
     return artifacts
 
 
+def write_notarization_receipt(
+    output: Path,
+    version: str,
+    artifacts: tuple[Path, ...],
+    accepted: dict[str, str],
+) -> Path:
+    receipt = output / NOTARIZATION_NAME
+    receipt.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "version": version,
+                **accepted,
+                "artifacts": {path.name: sha256_file(path) for path in artifacts},
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return receipt
+
+
+def verify_release_ready(repo_root: Path, version: str) -> None:
+    artifacts = verify_provenance(repo_root, version)
+    try:
+        receipt = json.loads((dist_dir(repo_root) / NOTARIZATION_NAME).read_text(encoding="utf-8"))
+    except FileNotFoundError, json.JSONDecodeError:
+        raise RuntimeError(
+            "No valid notarization receipt. This is not a publishable release; "
+            "run a full notarized build after release-preflight succeeds."
+        ) from None
+    if (
+        not isinstance(receipt, dict)
+        or type(receipt.get("schema")) is not int
+        or receipt.get("schema") != 1
+        or receipt.get("version") != version
+        or receipt.get("status") != "Accepted"
+        or any(
+            not isinstance(receipt.get(key), str)
+            or not receipt[key].strip()
+            or any(ord(char) < 32 or ord(char) == 127 for char in receipt[key])
+            for key in ("submission_id", "signing_identity", "profile")
+        )
+        or receipt.get("artifacts") != {path.name: sha256_file(path) for path in artifacts}
+    ):
+        raise RuntimeError("Notarization receipt does not match the accepted release artifacts")
+    print(f"Release ready: notarization {receipt['submission_id']} is Accepted for these artifacts")
+
+
 def formula_content(
     *,
     version: str,
@@ -586,6 +794,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Validate configured signing identity and Keychain profile before any build.",
+    )
+    mode.add_argument(
+        "--verify-release",
+        action="store_true",
+        help="Require matching artifact provenance and an Accepted notarization receipt.",
+    )
+    mode.add_argument(
         "--build",
         action="store_true",
         help="Explicitly select the default: rebuild all artifacts from current source.",
@@ -606,12 +824,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Rebuild and package the helper only, without touching the tracked native binary.",
     )
     parser.add_argument(
+        "--candidate",
+        action="store_true",
+        help="Explicitly build a private candidate without notarization; not publishable.",
+    )
+    parser.add_argument(
         "--signing-identity",
         help="Developer ID Application identity used to sign the freshly built helper.",
     )
     parser.add_argument(
         "--notary-profile",
-        help="Existing notarytool keychain profile; submit the signed helper and require Accepted.",
+        help="Existing Keychain profile (overrides NOTARY_PROFILE and pyproject release settings).",
+    )
+    parser.add_argument(
+        "--notary-keychain",
+        help="Optional custom Keychain file (overrides NOTARY_KEYCHAIN and pyproject settings).",
     )
     parser.add_argument(
         "--homepage",
@@ -631,10 +858,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Directory to write envrcctl.rb into. Defaults to ./Formula.",
     )
     args = parser.parse_args(argv)
-    if args.notary_profile and not args.signing_identity:
-        parser.error("--notary-profile requires --signing-identity")
-    if (args.formula_only or args.python_only) and (args.signing_identity or args.notary_profile):
+    if (args.formula_only or args.python_only or args.verify_release) and (
+        args.signing_identity or args.notary_profile or args.notary_keychain or args.candidate
+    ):
         parser.error("signing options require a helper build")
+    if args.candidate and (args.notary_profile or args.notary_keychain or args.preflight):
+        parser.error("--candidate cannot request notarization or release preflight")
     return args
 
 
@@ -649,23 +878,33 @@ def build_artifacts(repo_root: Path, version: str, args: argparse.Namespace) -> 
     with tempfile.TemporaryDirectory(prefix=".release-stage-", dir=output) as staging:
         stage = Path(staging)
         artifacts: tuple[Path, ...] = ()
+        accepted = None
         if not args.helper_only:
             artifacts = build_python_artifacts(repo_root, stage, args.uv)
         if not args.python_only:
             helper = build_helper_binary(repo_root, stage)
-            sign_helper(repo_root, helper, args.signing_identity, args.notary_profile)
+            accepted = sign_helper(
+                repo_root, helper, args.signing_identity, args.notary_profile, args.notary_keychain
+            )
             artifacts += (package_helper_archive(repo_root, version, helper, stage),)
         if input_hashes(repo_root) != inputs:
             raise RuntimeError("Release inputs changed during the build; retry after edits finish")
         provenance = None
+        receipt = None
         if not (args.python_only or args.helper_only):
             provenance = write_provenance(stage, version, inputs, artifacts)
+            if accepted is not None:
+                receipt = write_notarization_receipt(stage, version, artifacts, accepted)
         for artifact in artifacts:
             artifact.replace(output / artifact.name)
         if provenance is not None:
             provenance.replace(output / PROVENANCE_NAME)
         else:
             (output / PROVENANCE_NAME).unlink(missing_ok=True)
+        if receipt is not None:
+            receipt.replace(output / NOTARIZATION_NAME)
+        else:
+            (output / NOTARIZATION_NAME).unlink(missing_ok=True)
         return tuple(output / artifact.name for artifact in artifacts)
 
 
@@ -677,6 +916,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Preparing release artifacts for envrcctl {version}")
     print(f"Repository root: {repo_root}")
 
+    if args.verify_release:
+        verify_release_ready(repo_root, version)
+        return 0
+    if not (args.formula_only or args.python_only or args.helper_only):
+        resolve_credentials(repo_root, args)
+        preflight_credentials(repo_root, args)
+        if args.preflight:
+            return 0
+        if args.candidate:
+            print("PRIVATE CANDIDATE: notarization is disabled; do not publish.")
+    elif args.helper_only and (args.signing_identity or args.notary_profile):
+        preflight_credentials(repo_root, args)
     if not args.formula_only:
         artifacts = build_artifacts(repo_root, version, args)
         if args.python_only or args.helper_only:
@@ -684,6 +935,8 @@ def main(argv: list[str] | None = None) -> int:
             for artifact in artifacts:
                 print(f"- {artifact}")
             return 0
+        if not args.candidate:
+            verify_release_ready(repo_root, version)
     sdist_path, wheel_path, helper_archive = verify_provenance(repo_root, version)
 
     source_sha256 = sha256_file(sdist_path)

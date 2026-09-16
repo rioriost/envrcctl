@@ -17,10 +17,14 @@ release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release)
 
 ROOT = SCRIPT.parents[1]
+SIGNING_FIXTURE = "Developer ID Application: Test Operator (ABCDEFGHIJ)"
+SIGNING_FINGERPRINT = "A" * 40
 
 
 @pytest.fixture(autouse=True)
 def isolated_environment(tmp_path, monkeypatch):
+    for variable in ("SIGNING_IDENTITY", "NOTARY_PROFILE", "NOTARY_KEYCHAIN"):
+        monkeypatch.delenv(variable, raising=False)
     for variable in (
         "HOME",
         "XDG_CONFIG_HOME",
@@ -101,6 +105,325 @@ def seed_release(root):
     make_helper_archive(artifacts[2])
     release.write_provenance(root / "dist", "1.0", release.input_hashes(root), artifacts)
     return artifacts
+
+
+def configure_credentials(root, **settings):
+    path = root / "pyproject.toml"
+    path.write_text(
+        path.read_text()
+        + "\n[tool.envrcctl.release]\n"
+        + "".join(f"{key} = {json.dumps(value)}\n" for key, value in settings.items())
+    )
+
+
+def accepted_notarization():
+    return {
+        "status": "Accepted",
+        "submission_id": "stored-submission-id",
+        "profile": "existing.profile name",
+        "signing_identity": SIGNING_FIXTURE,
+    }
+
+
+@pytest.mark.parametrize("source", ["config", "environment", "command"])
+def test_credentials_selection_precedence(repository, monkeypatch, source):
+    configure_credentials(
+        repository,
+        **{"notary-profile": "config-profile", "signing-identity": SIGNING_FIXTURE},
+    )
+    argv = []
+    if source in ("environment", "command"):
+        monkeypatch.setenv("NOTARY_PROFILE", "environment-profile")
+    if source == "command":
+        argv = ["--notary-profile", "command-profile"]
+    args = release.parse_args(argv)
+    release.resolve_credentials(repository, args)
+    assert (
+        args.notary_profile
+        == {
+            "config": "config-profile",
+            "environment": "environment-profile",
+            "command": "command-profile",
+        }[source]
+    )
+    assert args.signing_identity == SIGNING_FIXTURE
+
+
+@pytest.mark.parametrize("key", ["notary-profile", "signing-identity", "notary-keychain"])
+@pytest.mark.parametrize("value", ["", "   ", "line\nbreak", 7])
+def test_invalid_persistent_credential_selection_is_rejected(repository, key, value):
+    configure_credentials(repository, **{key: value})
+    with pytest.raises(RuntimeError, match="single-line"):
+        release.resolve_credentials(repository, release.parse_args([]))
+
+
+def test_empty_environment_does_not_silently_fall_back_to_other_profile(repository, monkeypatch):
+    configure_credentials(repository, **{"notary-profile": "different-profile"})
+    monkeypatch.setenv("NOTARY_PROFILE", "")
+    with pytest.raises(RuntimeError, match="NOTARY_PROFILE"):
+        release.resolve_credentials(repository, release.parse_args([]))
+
+
+def test_missing_profile_is_a_selection_error_before_any_build(repository, monkeypatch):
+    monkeypatch.setattr(release, "project_root", lambda: repository)
+    monkeypatch.setattr(
+        release, "build_artifacts", lambda *args: pytest.fail("Build ran before preflight")
+    )
+    monkeypatch.setattr(
+        release.subprocess, "run", lambda *args, **kwargs: pytest.fail("Credential probing")
+    )
+    with pytest.raises(RuntimeError, match="Credentials may already exist in Keychain"):
+        release.main([])
+
+
+@pytest.mark.parametrize("custom_keychain", [None, "keys/notarization.keychain-db"])
+def test_configured_existing_keychain_profile_is_validated_without_environment(
+    repository, monkeypatch, custom_keychain
+):
+    settings = {"notary-profile": "existing.profile name", "signing-identity": SIGNING_FIXTURE}
+    if custom_keychain:
+        settings["notary-keychain"] = custom_keychain
+    configure_credentials(repository, **settings)
+    monkeypatch.setattr(release, "project_root", lambda: repository)
+    calls = []
+
+    def command(argv, **kwargs):
+        calls.append(argv)
+        assert kwargs["capture_output"] and kwargs["timeout"] == 60
+        assert "-w" not in argv and "-g" not in argv and "--password" not in argv
+        stdout = (
+            f'  1) {SIGNING_FINGERPRINT} "{SIGNING_FIXTURE}"\n'
+            if argv[0] == "/usr/bin/security"
+            else '{"history":[]}'
+        )
+        return subprocess.CompletedProcess(argv, 0, stdout, "")
+
+    monkeypatch.setattr(release.subprocess, "run", command)
+    monkeypatch.setattr(release, "build_artifacts", lambda *args: pytest.fail("Preflight built"))
+    before = list((repository / "dist").iterdir())
+    assert release.main(["--preflight"]) == 0
+    assert calls[1][:5] == [
+        "xcrun",
+        "notarytool",
+        "history",
+        "--keychain-profile",
+        "existing.profile name",
+    ]
+    if custom_keychain:
+        assert str(repository / custom_keychain) in calls[1]
+    assert list((repository / "dist").iterdir()) == before
+
+
+@pytest.mark.parametrize("returncode", [69, 1])
+def test_profile_validation_failure_preserves_existing_artifacts(
+    repository, monkeypatch, returncode
+):
+    configure_credentials(
+        repository, **{"notary-profile": "selected-profile", "signing-identity": SIGNING_FIXTURE}
+    )
+    artifacts = seed_release(repository)
+    before = [release.sha256_file(path) for path in artifacts]
+    monkeypatch.setattr(release, "project_root", lambda: repository)
+
+    def command(argv, **kwargs):
+        if argv[0] == "/usr/bin/security":
+            return subprocess.CompletedProcess(
+                argv, 0, f'1) {SIGNING_FINGERPRINT} "{SIGNING_FIXTURE}"\n', ""
+            )
+        return subprocess.CompletedProcess(argv, returncode, "", "DUMMY_PRIVATE_DIAGNOSTIC")
+
+    monkeypatch.setattr(release.subprocess, "run", command)
+    monkeypatch.setattr(
+        release, "build_artifacts", lambda *args: pytest.fail("Failed preflight started build")
+    )
+    with pytest.raises(RuntimeError, match="inaccessible selected profile") as error:
+        release.main([])
+    assert "DUMMY_PRIVATE_DIAGNOSTIC" not in str(error.value)
+    assert [release.sha256_file(path) for path in artifacts] == before
+
+
+@pytest.mark.parametrize("identities", ["", "duplicate"])
+def test_identity_must_select_exactly_one_valid_certificate(repository, monkeypatch, identities):
+    args = release.parse_args(
+        ["--notary-profile", "profile", "--signing-identity", SIGNING_FIXTURE]
+    )
+    stdout = (
+        f'1) {SIGNING_FINGERPRINT} "{SIGNING_FIXTURE}"\n2) {"B" * 40} "{SIGNING_FIXTURE}"\n'
+        if identities
+        else ""
+    )
+    monkeypatch.setattr(
+        release.subprocess,
+        "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, stdout, ""),
+    )
+    with pytest.raises(RuntimeError, match="one valid Developer ID"):
+        release.preflight_credentials(repository, args)
+
+
+@pytest.mark.parametrize("history", ["not json", "null", "[]", "{}"])
+def test_malformed_notary_history_fails_closed(repository, monkeypatch, history):
+    args = release.parse_args(
+        ["--notary-profile", "profile", "--signing-identity", SIGNING_FIXTURE]
+    )
+    responses = iter([f'1) {SIGNING_FINGERPRINT} "{SIGNING_FIXTURE}"\n', history])
+    monkeypatch.setattr(
+        release.subprocess,
+        "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, next(responses), ""),
+    )
+    with pytest.raises(RuntimeError, match="Notarization preflight returned"):
+        release.preflight_credentials(repository, args)
+
+
+def test_candidate_does_not_implicitly_use_release_credentials(repository, monkeypatch):
+    configure_credentials(
+        repository, **{"notary-profile": "stored-profile", "signing-identity": SIGNING_FIXTURE}
+    )
+    monkeypatch.setenv("NOTARY_PROFILE", "environment-profile")
+    args = release.parse_args(["--candidate"])
+    release.resolve_credentials(repository, args)
+    assert args.notary_profile is None and args.signing_identity is None
+    monkeypatch.setattr(
+        release.subprocess, "run", lambda *args, **kwargs: pytest.fail("Candidate read credentials")
+    )
+    release.preflight_credentials(repository, args)
+
+
+def test_release_readiness_requires_an_accepted_receipt(repository, monkeypatch):
+    artifacts = seed_release(repository)
+    monkeypatch.setattr(release, "project_root", lambda: repository)
+    with pytest.raises(RuntimeError, match="not a publishable release"):
+        release.main(["--verify-release"])
+    release.write_notarization_receipt(
+        repository / "dist", "1.0", artifacts, accepted_notarization()
+    )
+    assert release.main(["--verify-release"]) == 0
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("status", "Invalid"),
+        ("submission_id", ""),
+        ("profile", None),
+        ("version", "0.9"),
+        ("schema", True),
+        ("artifacts", {}),
+    ],
+)
+def test_readiness_rejects_mismatched_receipts(repository, field, value):
+    artifacts = seed_release(repository)
+    path = release.write_notarization_receipt(
+        repository / "dist", "1.0", artifacts, accepted_notarization()
+    )
+    receipt = json.loads(path.read_text())
+    receipt[field] = value
+    path.write_text(json.dumps(receipt))
+    with pytest.raises(RuntimeError, match="does not match"):
+        release.verify_release_ready(repository, "1.0")
+
+
+def test_partial_build_removes_stale_acceptance_receipt(repository, monkeypatch):
+    artifacts = seed_release(repository)
+    receipt = release.write_notarization_receipt(
+        repository / "dist", "1.0", artifacts, accepted_notarization()
+    )
+    monkeypatch.setattr(release, "sync_dev_environment", lambda *args: None)
+    monkeypatch.setattr(release, "generate_completions", lambda *args: None)
+    monkeypatch.setattr(
+        release,
+        "build_python_artifacts",
+        lambda root, output, uv: make_python_archives(output),
+    )
+    release.build_artifacts(repository, "1.0", release.parse_args(["--python-only"]))
+    assert not receipt.exists()
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+def test_production_build_preflights_first_and_requires_its_own_receipt(
+    repository, monkeypatch, accepted
+):
+    configure_credentials(
+        repository,
+        **{"notary-profile": "existing.profile name", "signing-identity": SIGNING_FIXTURE},
+    )
+    monkeypatch.setattr(release, "project_root", lambda: repository)
+    calls = []
+
+    def credentials(command, root, description):
+        calls.append(command[0])
+        if command[0] == "/usr/bin/security":
+            return f'1) {SIGNING_FINGERPRINT} "{SIGNING_FIXTURE}"\n'
+        return '{"history":[]}'
+
+    def python_build(root, output, uv):
+        calls.append("python")
+        return make_python_archives(output)
+
+    def helper_build(root, output):
+        calls.append("helper")
+        path = output / release.HELPER_NAME
+        path.write_bytes(b"helper")
+        return path
+
+    def notarize(*args):
+        calls.append("notarize")
+        return accepted_notarization() if accepted else None
+
+    monkeypatch.setattr(release, "credential_command", credentials)
+    monkeypatch.setattr(release, "sync_dev_environment", lambda *args: calls.append("sync"))
+    monkeypatch.setattr(release, "generate_completions", lambda *args: calls.append("completions"))
+    monkeypatch.setattr(release, "build_python_artifacts", python_build)
+    monkeypatch.setattr(release, "build_helper_binary", helper_build)
+    monkeypatch.setattr(release, "sign_helper", notarize)
+    monkeypatch.setattr(release, "dependency_resource_specs", lambda *args: [])
+    if accepted:
+        assert release.main([]) == 0
+        release.verify_release_ready(repository, "1.0")
+        receipt = json.loads((repository / "dist" / release.NOTARIZATION_NAME).read_text())
+        assert receipt["profile"] == "existing.profile name"
+        assert len(receipt["artifacts"]) == 3
+    else:
+        with pytest.raises(RuntimeError, match="not a publishable release"):
+            release.main([])
+    assert calls == [
+        "/usr/bin/security",
+        "xcrun",
+        "sync",
+        "completions",
+        "python",
+        "helper",
+        "notarize",
+    ]
+
+
+@pytest.mark.parametrize("failure", [FileNotFoundError(), subprocess.TimeoutExpired("tool", 60)])
+def test_preflight_tool_failures_are_actionable_and_sanitized(repository, monkeypatch, failure):
+    def failed(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(release.subprocess, "run", failed)
+    with pytest.raises(RuntimeError, match="could not run"):
+        release.credential_command(["tool"], repository, "Notarization preflight")
+
+
+def test_custom_keychain_is_used_for_actual_submission(repository, monkeypatch):
+    calls = []
+    monkeypatch.setattr(release, "run", lambda *args, **kwargs: None)
+
+    def submitted(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(
+            command, 0, json.dumps({"status": "Accepted", "id": "submission"}), ""
+        )
+
+    monkeypatch.setattr(release.subprocess, "run", submitted)
+    response = release.sign_helper(
+        repository, repository / "helper", SIGNING_FIXTURE, "existing profile", "/custom/keychain"
+    )
+    assert calls[0][calls[0].index("--keychain") + 1] == "/custom/keychain"
+    assert response["submission_id"] == "submission"
 
 
 def test_runtime_resources_use_locked_universal_wheels():
@@ -261,12 +584,12 @@ def test_pipeline_always_rebuilds_in_order_and_stops_on_failure(repository, monk
     monkeypatch.setattr(release, "write_formula", lambda *args: stage("formula"))
     if failure:
         with pytest.raises(subprocess.CalledProcessError) as error:
-            release.main([])
+            release.main(["--candidate"])
         assert error.value.returncode == 23
         assert calls == stages[: stages.index(failure) + 1]
         assert [release.sha256_file(path) for path in previous] == previous_hashes
     else:
-        assert release.main([]) == 0
+        assert release.main(["--candidate"]) == 0
         assert calls == stages
         release.verify_provenance(repository, "1.0")
     assert (repository / "src/envrcctl/envrcctl-macos-auth").read_bytes() == before_helper
@@ -480,7 +803,9 @@ def test_signing_precedes_notarization_and_requires_acceptance(monkeypatch, tmp_
 @pytest.mark.parametrize(
     "args",
     [
-        ["--notary-profile", "profile"],
+        ["--candidate", "--notary-profile", "profile"],
+        ["--candidate", "--preflight"],
+        ["--verify-release", "--candidate"],
         ["--formula-only", "--signing-identity", "identity"],
         ["--python-only", "--signing-identity", "identity"],
     ],
