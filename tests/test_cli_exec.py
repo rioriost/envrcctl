@@ -38,13 +38,12 @@ def test_cli_exec_records_success_audit_event(tmp_path: Path, monkeypatch) -> No
     runner = CliRunner()
     dummy = DummyBackend()
     audit_calls: list[dict] = []
+    monkeypatch.setattr(cli.uuid, "uuid4", lambda: "operation-id")
 
     monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
-    monkeypatch.setattr(
-        cli, "append_event", lambda **kwargs: audit_calls.append(kwargs)
-    )
+    monkeypatch.setattr(cli, "append_event", lambda **kwargs: audit_calls.append(kwargs))
     monkeypatch.setattr(cli.sys, "platform", "linux")
 
     runner.invoke(cli.app, ["init"])
@@ -58,6 +57,9 @@ def test_cli_exec_records_success_audit_event(tmp_path: Path, monkeypatch) -> No
     result = runner.invoke(cli.app, ["exec", "--", sys.executable, "-c", script])
 
     assert result.exit_code == 0
+    assert [call["status"] for call in audit_calls] == ["started", "success"]
+    assert audit_calls[0] == {**audit_calls[1], "status": "started"}
+    audit_calls = audit_calls[1:]
     assert audit_calls == [
         {
             "action": "exec",
@@ -73,8 +75,9 @@ def test_cli_exec_records_success_audit_event(tmp_path: Path, monkeypatch) -> No
             ],
             "cwd": tmp_path,
             "platform": "linux",
-            "command": [sys.executable, "-c", script],
+            "command": [Path(sys.executable).name],
             "error": None,
+            "operation_id": "operation-id",
         }
     ]
 
@@ -84,6 +87,7 @@ def test_cli_exec_records_failure_audit_event(tmp_path: Path, monkeypatch) -> No
     runner = CliRunner()
     dummy = DummyBackend()
     audit_calls: list[dict] = []
+    monkeypatch.setattr(cli.uuid, "uuid4", lambda: "operation-id")
 
     def fake_get(ref) -> str:
         raise EnvrcctlError("boom")
@@ -92,9 +96,7 @@ def test_cli_exec_records_failure_audit_event(tmp_path: Path, monkeypatch) -> No
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
     monkeypatch.setattr(dummy, "get", fake_get)
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
-    monkeypatch.setattr(
-        cli, "append_event", lambda **kwargs: audit_calls.append(kwargs)
-    )
+    monkeypatch.setattr(cli, "append_event", lambda **kwargs: audit_calls.append(kwargs))
     monkeypatch.setattr(cli.sys, "platform", "linux")
 
     runner.invoke(cli.app, ["init"])
@@ -124,7 +126,8 @@ def test_cli_exec_records_failure_audit_event(tmp_path: Path, monkeypatch) -> No
             "cwd": tmp_path,
             "platform": "linux",
             "command": ["printenv"],
-            "error": AuditErrorInfo(code="exec_failed", message="boom"),
+            "error": AuditErrorInfo(code="exec_failed", message="EnvrcctlError: operation failed."),
+            "operation_id": "operation-id",
         }
     ]
 
@@ -164,9 +167,7 @@ def test_cli_exec_on_macos_requires_auth(tmp_path: Path, monkeypatch) -> None:
     ]
 
 
-def test_cli_exec_on_macos_requires_interactive_shell(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_exec_on_macos_requires_interactive_shell(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
     dummy = DummyBackend()
@@ -192,9 +193,7 @@ def test_cli_exec_on_macos_requires_interactive_shell(
     )
 
 
-def test_cli_exec_on_macos_fails_closed_when_auth_is_cancelled(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_exec_on_macos_fails_closed_when_auth_is_cancelled(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
     dummy = DummyBackend()
@@ -311,9 +310,7 @@ def test_cli_exec_missing_selected_secret(tmp_path: Path, monkeypatch) -> None:
     assert "Secrets not found" in result.stderr
 
 
-def test_cli_exec_includes_exports_and_selected_secrets(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_exec_includes_exports_and_selected_secrets(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
     dummy = DummyBackend()
@@ -342,9 +339,7 @@ def test_cli_exec_includes_exports_and_selected_secrets(
         "os.getenv('TOKEN')=='secretvalue' and "
         "os.getenv('OTHER') is None) else 1)"
     )
-    result = runner.invoke(
-        cli.app, ["exec", "-k", "TOKEN", "--", sys.executable, "-c", script]
-    )
+    result = runner.invoke(cli.app, ["exec", "-k", "TOKEN", "--", sys.executable, "-c", script])
     assert result.exit_code == 0
 
 
@@ -355,7 +350,5 @@ def test_cli_exec_propagates_exit_code(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
 
     runner.invoke(cli.app, ["init"])
-    result = runner.invoke(
-        cli.app, ["exec", "--", sys.executable, "-c", "import sys; sys.exit(2)"]
-    )
+    result = runner.invoke(cli.app, ["exec", "--", sys.executable, "-c", "import sys; sys.exit(2)"])
     assert result.exit_code == 2

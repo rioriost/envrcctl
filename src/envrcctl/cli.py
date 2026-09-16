@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import getpass
 import os
 import re
@@ -7,8 +8,10 @@ import shlex
 import shutil
 import subprocess
 import sys
+import uuid
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Callable
+from typing import Annotated
 
 import typer
 
@@ -16,7 +19,6 @@ from .audit import (
     AuditErrorInfo,
     AuditRef,
     append_event,
-    ensure_audit_store_secure,
     iter_events,
     verify_chain,
 )
@@ -24,6 +26,7 @@ from .command_runner import run_command
 from .envrc import (
     ENVRC_FILENAME,
     ensure_managed_block,
+    envrc_transaction,
     extract_unmanaged_exports,
     is_group_writable,
     is_world_writable,
@@ -34,6 +37,9 @@ from .errors import EnvrcctlError
 from .managed_block import ManagedBlock
 from .secrets import (
     DEFAULT_SERVICE,
+    AuthenticatedSecretBackend,
+    SecretBackend,
+    SecretRef,
     backend_for_ref,
     format_ref,
     parse_ref,
@@ -52,7 +58,7 @@ RISKY_EXPORT_RE = re.compile(
 )
 
 
-def _audit_ref(ref) -> AuditRef:
+def _audit_ref(ref: SecretRef) -> AuditRef:
     return AuditRef(
         scheme=ref.scheme,
         service=ref.service,
@@ -62,7 +68,7 @@ def _audit_ref(ref) -> AuditRef:
 
 
 def _audit_error(code: str, exc: Exception) -> AuditErrorInfo:
-    return AuditErrorInfo(code=code, message=str(exc))
+    return AuditErrorInfo(code=code, message=f"{type(exc).__name__}: operation failed.")
 
 
 def _record_secret_access_event(
@@ -70,9 +76,10 @@ def _record_secret_access_event(
     action: str,
     status: str,
     vars: list[str],
-    refs: list,
+    refs: list[SecretRef],
     command: list[str] | None = None,
     error: AuditErrorInfo | None = None,
+    operation_id: str | None = None,
 ) -> None:
     append_event(
         action=action,
@@ -81,8 +88,9 @@ def _record_secret_access_event(
         refs=[_audit_ref(ref) for ref in refs],
         cwd=Path.cwd(),
         platform=sys.platform,
-        command=command,
+        command=[Path(command[0]).name] if command else None,
         error=error,
+        operation_id=operation_id,
     )
 
 
@@ -106,10 +114,30 @@ def _run(action: Callable[[], None]) -> None:
     except EnvrcctlError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
+    except OSError as exc:
+        typer.echo(f"Error: filesystem or process operation failed ({exc.strerror}).", err=True)
+        raise typer.Exit(code=1) from None
 
 
 def _is_interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _has_controlling_terminal() -> bool:
+    try:
+        fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
+    except OSError as exc:
+        if exc.errno in (errno.ENXIO, errno.ENODEV, errno.ENOENT, errno.EACCES):
+            return False
+        raise EnvrcctlError("Could not inspect the controlling terminal.") from None
+    try:
+        return os.isatty(fd)
+    finally:
+        os.close(fd)
+
+
+def _ref_identity(ref: SecretRef) -> tuple[str, str, str]:
+    return ref.scheme, ref.service, ref.account
 
 
 def _format_audit_command(command: list[str] | None) -> str:
@@ -125,33 +153,50 @@ def _require_secret_access_auth(reason: str) -> str | None:
 
 
 def _get_secret_value(
-    backend,
-    ref,
+    backend: SecretBackend,
+    ref: SecretRef,
     auth_reason: str | None,
 ) -> str:
     if sys.platform == "darwin":
-        return backend.get_with_auth(ref, auth_reason)
-    return backend.get(ref)
+        if not isinstance(backend, AuthenticatedSecretBackend):
+            raise EnvrcctlError("Secret backend does not support authenticated access.")
+        value = backend.get_with_auth(ref, auth_reason)
+    else:
+        value = backend.get(ref)
+    if not isinstance(value, str):
+        raise EnvrcctlError("Secret backend returned an invalid value.")
+    return value
 
 
 def _get_secret_values(
-    refs: list,
+    refs: list[SecretRef],
     auth_reason: str | None,
-) -> dict[tuple[str, str], str]:
-    if not refs:
-        return {}
-    backend = backend_for_ref(refs[0])
-    if sys.platform == "darwin":
-        if hasattr(backend, "get_many_with_auth"):
-            return backend.get_many_with_auth(refs, auth_reason)
-    values: dict[tuple[str, str], str] = {}
+) -> dict[tuple[str, str, str], str]:
+    groups: dict[str, list[SecretRef]] = {}
+    backends: dict[str, SecretBackend] = {}
     for ref in refs:
-        ref_backend = backend_for_ref(ref)
-        values[(ref.service, ref.account)] = _get_secret_value(
-            ref_backend,
-            ref,
-            auth_reason,
-        )
+        if ref.scheme not in backends:
+            backends[ref.scheme] = backend_for_ref(ref)
+        groups.setdefault(ref.scheme, []).append(ref)
+    values: dict[tuple[str, str, str], str] = {}
+    for scheme, group in groups.items():
+        backend = backends[scheme]
+        if sys.platform == "darwin":
+            if not isinstance(backend, AuthenticatedSecretBackend):
+                raise EnvrcctlError("Secret backend does not support authenticated access.")
+            batch = backend.get_many_with_auth(group, auth_reason)
+            if not isinstance(batch, Mapping):
+                raise EnvrcctlError("Secret backend returned an invalid batch.")
+            for ref in group:
+                value = batch.get((ref.service, ref.account))
+                if not isinstance(value, str):
+                    raise EnvrcctlError("Secret backend returned an incomplete or invalid batch.")
+                values[_ref_identity(ref)] = value
+        else:
+            for ref in group:
+                values[_ref_identity(ref)] = _get_secret_value(backend, ref, auth_reason)
+    if any("\0" in value for value in values.values()):
+        raise EnvrcctlError("Secrets containing NUL cannot be injected into an environment.")
     return values
 
 
@@ -186,7 +231,7 @@ def _copy_to_clipboard(value: str) -> None:
 
 
 def _validate_env_var(name: str) -> None:
-    if not ENV_VAR_RE.match(name):
+    if not ENV_VAR_RE.fullmatch(name):
         raise EnvrcctlError(f"Invalid environment variable name: {name}")
 
 
@@ -266,6 +311,8 @@ def set(
 
     def action() -> None:
         _validate_env_var(var)
+        if "\0" in value:
+            raise EnvrcctlError("Environment variable values cannot contain NUL.")
         doc = load_envrc(_envrc_path())
         block = ensure_managed_block(doc)
         block.exports[var] = value
@@ -339,46 +386,50 @@ def secret_set(
             confirm = getpass.getpass("Confirm secret value: ")
             if confirm != value:
                 raise EnvrcctlError("Secret value does not match confirmation.")
-        value = value.rstrip("\n")
         if not value:
             raise EnvrcctlError("Secret value is empty.")
         scheme, backend = resolve_backend()
         ref = format_ref(service, account, scheme=scheme, kind=kind)
-        backend.set(parse_ref(ref), value)
-
-        doc = load_envrc(_envrc_path())
-        block = ensure_managed_block(doc)
-        block.secret_refs[var] = ref
-        if inject:
-            block.include_inject = True
-        _write_envrc(doc, block)
+        with envrc_transaction(_envrc_path()) as doc:
+            block = ensure_managed_block(doc)
+            block.secret_refs[var] = ref
+            if inject:
+                block.include_inject = True
+            _write_envrc(doc, block)
+            backend.set(parse_ref(ref), value)
 
     _run(action)
 
 
 @secret_app.command("unset")
-def secret_unset(var: str) -> None:
-    """Remove a secret reference and delete it from the backend."""
+def secret_unset(
+    var: str,
+    delete: bool = typer.Option(False, "--delete", help="Also delete the shared OS-store item."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm deleting the OS-store item."),
+) -> None:
+    """Remove a reference; delete its shared OS-store item only with --delete."""
 
     def action() -> None:
         _validate_env_var(var)
-        doc = load_envrc(_envrc_path())
-        block = ensure_managed_block(doc)
-        ref = block.secret_refs.get(var)
-        if not ref:
-            raise EnvrcctlError(f"{var} has no secret reference.")
-        parsed = parse_ref(ref)
-
-        shared_ref_in_use = any(
-            name != var and other_ref == ref for name, other_ref in block.secret_refs.items()
-        )
-
-        if not shared_ref_in_use:
-            backend = backend_for_ref(parsed)
-            backend.delete(parsed)
-
-        block.secret_refs.pop(var, None)
-        _write_envrc(doc, block)
+        with envrc_transaction(_envrc_path()) as doc:
+            block = ensure_managed_block(doc)
+            ref = block.secret_refs.get(var)
+            if not ref:
+                raise EnvrcctlError(f"{var} has no secret reference.")
+            parsed = parse_ref(ref)
+            backend = None
+            if delete:
+                if any(
+                    name != var and _ref_identity(parse_ref(other_ref)) == _ref_identity(parsed)
+                    for name, other_ref in block.secret_refs.items()
+                ):
+                    raise EnvrcctlError("Secret is still referenced in this managed block.")
+                _confirm_or_abort("Delete the OS-store item? Other projects may still use it.", yes)
+                backend = backend_for_ref(parsed)
+            block.secret_refs.pop(var, None)
+            _write_envrc(doc, block)
+            if backend is not None:
+                backend.delete(parsed)
 
     _run(action)
 
@@ -418,41 +469,21 @@ def secret_get(
         backend = backend_for_ref(parsed)
 
         try:
+            plaintext = plain or show
             if not _is_interactive():
                 if not force_plain:
                     raise EnvrcctlError(
-                        "secret get is blocked in non-interactive environments. Use --force-plain to override."
+                        "secret get is blocked in non-interactive environments. "
+                        "Use --force-plain to override."
                     )
                 if sys.platform == "darwin":
                     raise EnvrcctlError(
-                        "secret get on macOS requires an interactive shell and device owner authentication."
+                        "secret get on macOS requires an interactive shell "
+                        "and device owner authentication."
                     )
-                value = backend.get(parsed)
-                _record_secret_access_event(
-                    action="secret_get",
-                    status="success",
-                    vars=[var],
-                    refs=[parsed],
-                )
-                typer.echo(value)
-                return
-
+                plaintext = True
             auth_reason = _require_secret_access_auth(f"Access secret {var} with envrcctl")
             value = _get_secret_value(backend, parsed, auth_reason)
-            _record_secret_access_event(
-                action="secret_get",
-                status="success",
-                vars=[var],
-                refs=[parsed],
-            )
-
-            if plain or show:
-                typer.echo(value)
-                return
-
-            _copy_to_clipboard(value)
-            masked = _mask_secret(value)
-            typer.echo(f"Copied to clipboard: {var}={masked}")
         except EnvrcctlError as exc:
             status = "cancelled" if "cancelled" in str(exc).lower() else "failure"
             _record_secret_access_event(
@@ -463,6 +494,17 @@ def secret_get(
                 error=_audit_error("secret_get_failed", exc),
             )
             raise
+        _record_secret_access_event(
+            action="secret_get",
+            status="success",
+            vars=[var],
+            refs=[parsed],
+        )
+        if plaintext:
+            typer.echo(value)
+        else:
+            _copy_to_clipboard(value)
+            typer.echo(f"Copied to clipboard: {var}={_mask_secret(value)}")
 
     _run(action)
 
@@ -472,17 +514,21 @@ def inject(
     force: bool = typer.Option(
         False, "--force", help="Allow inject in non-interactive environments."
     ),
+    shell: bool = typer.Option(
+        False, "--shell", help="Allow shell capture when a controlling terminal is available."
+    ),
 ) -> None:
     """Emit export statements for all secret references."""
 
     def action() -> None:
-        runtime_refs: list[tuple[str, object]] = []
+        runtime_refs: list[tuple[str, SecretRef]] = []
         try:
-            if not _is_interactive() and not force:
+            interactive = _is_interactive() or (shell and _has_controlling_terminal())
+            if not interactive and not force:
                 raise EnvrcctlError(
                     "inject is blocked in non-interactive environments. Use --force to override."
                 )
-            if sys.platform == "darwin" and not _is_interactive():
+            if sys.platform == "darwin" and not interactive:
                 raise EnvrcctlError(
                     "inject on macOS requires an interactive shell and device owner authentication."
                 )
@@ -500,15 +546,6 @@ def inject(
                 [ref for _, ref in runtime_refs],
                 auth_reason,
             )
-            _record_secret_access_event(
-                action="inject",
-                status="success",
-                vars=[key for key, _ in runtime_refs],
-                refs=[ref for _, ref in runtime_refs],
-            )
-            for key, ref in runtime_refs:
-                value = values[(ref.service, ref.account)]
-                typer.echo(f"export {key}={shlex.quote(value)}")
         except EnvrcctlError as exc:
             status = "cancelled" if "cancelled" in str(exc).lower() else "failure"
             _record_secret_access_event(
@@ -519,6 +556,17 @@ def inject(
                 error=_audit_error("inject_failed", exc),
             )
             raise
+        _record_secret_access_event(
+            action="inject",
+            status="success",
+            vars=[key for key, _ in runtime_refs],
+            refs=[ref for _, ref in runtime_refs],
+        )
+        output = "\n".join(
+            f"export {key}={shlex.quote(values[_ref_identity(ref)])}" for key, ref in runtime_refs
+        )
+        if output:
+            typer.echo(output)
 
     _run(action)
 
@@ -529,25 +577,25 @@ def inject(
 )
 def exec_cmd(
     ctx: typer.Context,
-    key: list[str] = typer.Option(
-        None,
-        "-k",
-        "--key",
-        help="Limit injected secrets to specific variables.",
-    ),
+    key: Annotated[
+        list[str] | None,
+        typer.Option("-k", "--key", help="Limit injected secrets to specific variables."),
+    ] = None,
 ) -> None:
     """Execute a command with managed secrets injected into the environment."""
 
     def action() -> None:
-        runtime_refs: list[tuple[str, object]] = []
+        runtime_refs: list[tuple[str, SecretRef]] = []
         command = list(ctx.args)
+        operation_id = str(uuid.uuid4())
         try:
             if not ctx.args:
                 raise EnvrcctlError("No command provided. Use -- to separate the command.")
             if not _is_interactive():
                 if sys.platform == "darwin":
                     raise EnvrcctlError(
-                        "exec on macOS requires an interactive shell and device owner authentication."
+                        "exec on macOS requires an interactive shell "
+                        "and device owner authentication."
                     )
                 raise EnvrcctlError("exec is blocked in non-interactive environments.")
             auth_reason = _require_secret_access_auth("Execute command with envrcctl")
@@ -583,19 +631,7 @@ def exec_cmd(
                 auth_reason,
             )
             for name, ref in runtime_refs:
-                env[name] = values[(ref.service, ref.account)]
-
-            result = subprocess.run(command, env=env)
-            status = "success" if result.returncode == 0 else "failure"
-            _record_secret_access_event(
-                action="exec",
-                status=status,
-                vars=[name for name, _ in runtime_refs],
-                refs=[ref for _, ref in runtime_refs],
-                command=command,
-            )
-            if result.returncode != 0:
-                raise typer.Exit(code=result.returncode)
+                env[name] = values[_ref_identity(ref)]
         except EnvrcctlError as exc:
             status = "cancelled" if "cancelled" in str(exc).lower() else "failure"
             _record_secret_access_event(
@@ -605,8 +641,54 @@ def exec_cmd(
                 refs=[ref for _, ref in runtime_refs],
                 command=command or None,
                 error=_audit_error("exec_failed", exc),
+                operation_id=operation_id,
             )
             raise
+        _record_secret_access_event(
+            action="exec",
+            status="started",
+            vars=[name for name, _ in runtime_refs],
+            refs=[ref for _, ref in runtime_refs],
+            command=command,
+            operation_id=operation_id,
+        )
+        try:
+            result = subprocess.run(command, env=env)
+        except OSError as exc:
+            _record_secret_access_event(
+                action="exec",
+                status="failure",
+                vars=[name for name, _ in runtime_refs],
+                refs=[ref for _, ref in runtime_refs],
+                command=command,
+                error=_audit_error("exec_start_failed", exc),
+                operation_id=operation_id,
+            )
+            raise EnvrcctlError(
+                f"Could not start command ({exc.strerror or type(exc).__name__})."
+            ) from None
+        except KeyboardInterrupt:
+            _record_secret_access_event(
+                action="exec",
+                status="cancelled",
+                vars=[name for name, _ in runtime_refs],
+                refs=[ref for _, ref in runtime_refs],
+                command=command,
+                operation_id=operation_id,
+            )
+            raise typer.Exit(code=130) from None
+        _record_secret_access_event(
+            action="exec",
+            status="success" if result.returncode == 0 else "failure",
+            vars=[name for name, _ in runtime_refs],
+            refs=[ref for _, ref in runtime_refs],
+            command=command,
+            operation_id=operation_id,
+        )
+        if result.returncode != 0:
+            raise typer.Exit(
+                code=result.returncode if result.returncode > 0 else 128 - result.returncode
+            )
 
     _run(action)
 
@@ -640,6 +722,7 @@ def audit_list(
                     [
                         {
                             "event_id": event.event_id,
+                            "operation_id": event.operation_id,
                             "timestamp": event.timestamp,
                             "action": event.action,
                             "status": event.status,
@@ -725,6 +808,7 @@ def audit_show(
                 json.dumps(
                     {
                         "event_id": selected.event_id,
+                        "operation_id": selected.operation_id,
                         "timestamp": selected.timestamp,
                         "action": selected.action,
                         "status": selected.status,
@@ -759,6 +843,7 @@ def audit_show(
             return
 
         typer.echo(f"event_id: {selected.event_id}")
+        typer.echo(f"operation_id: {selected.operation_id or '-'}")
         typer.echo(f"timestamp: {selected.timestamp}")
         typer.echo(f"action: {selected.action}")
         typer.echo(f"status: {selected.status}")
@@ -861,7 +946,7 @@ def doctor() -> None:
                 "WARN: .envrc is a symlink. Writes are blocked; use a regular file.",
                 err=True,
             )
-            warnings += 1
+            return
         if is_group_writable(path):
             typer.echo(
                 "WARN: .envrc is group-writable. Consider chmod g-w .envrc.",
@@ -885,7 +970,8 @@ def doctor() -> None:
             warnings += 1
         elif doc.managed and not doc.managed.include_inject:
             typer.echo(
-                "WARN: inject line missing in managed block. direnv auto-injection is not enabled. Run `envrcctl init --inject` to add it.",
+                "WARN: inject line missing in managed block. "
+                "direnv auto-injection is not enabled. Run `envrcctl init --inject` to add it.",
                 err=True,
             )
             warnings += 1
@@ -897,14 +983,16 @@ def doctor() -> None:
         if unmanaged:
             keys = ", ".join(sorted(unmanaged.keys()))
             typer.echo(
-                f"WARN: unmanaged exports outside block: {keys}. Run `envrcctl migrate` to move them.",
+                f"WARN: unmanaged exports outside block: {keys}. "
+                "Run `envrcctl migrate` to move them.",
                 err=True,
             )
             warnings += 1
         if unmanaged_secrets:
             keys = ", ".join(sorted(unmanaged_secrets.keys()))
             typer.echo(
-                f"WARN: unmanaged secret refs outside block: {keys}. Run `envrcctl migrate` to move them.",
+                f"WARN: unmanaged secret refs outside block: {keys}. "
+                "Run `envrcctl migrate` to move them.",
                 err=True,
             )
             warnings += 1
@@ -945,13 +1033,6 @@ def doctor() -> None:
                 err=True,
             )
             warnings += 1
-        else:
-            try:
-                ensure_audit_store_secure()
-            except EnvrcctlError as exc:
-                typer.echo(f"WARN: audit store is not secure: {exc}", err=True)
-                warnings += 1
-
         if warnings == 0:
             typer.echo("OK")
 
@@ -972,8 +1053,25 @@ def migrate(
         doc = load_envrc(path)
         block = ensure_managed_block(doc)
 
-        before_clean, before_exports, before_secrets = extract_unmanaged_exports(doc.before)
-        after_clean, after_exports, after_secrets = extract_unmanaged_exports(doc.after)
+        before_clean, before_exports, before_secrets = extract_unmanaged_exports(
+            doc.before, strict=True
+        )
+        after_clean, after_exports, after_secrets = extract_unmanaged_exports(
+            doc.after, strict=True
+        )
+
+        for groups in (
+            (before_exports, block.exports, after_exports),
+            (before_secrets, block.secret_refs, after_secrets),
+        ):
+            merged: dict[str, str] = {}
+            for group in groups:
+                for name, value in group.items():
+                    if name in merged and merged[name] != value:
+                        raise EnvrcctlError(
+                            f"Conflicting assignments for {name}; resolve them before migrating."
+                        )
+                    merged[name] = value
 
         if before_exports or after_exports or before_secrets or after_secrets:
             _confirm_or_abort("Migrate unmanaged exports into the managed block?", yes)

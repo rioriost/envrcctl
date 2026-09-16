@@ -13,7 +13,7 @@ macOS を優先しつつ、Linux でも `secret-tool` を使った運用に対�
 - シークレットは Keychain / SecretService に保管
 - 継承制御（`source_up` on/off）
 - stdout に出さない exec 注入（`envrcctl exec -- ...`）
-- direnv 向けの secret 注入（`eval "$(envrcctl inject)"`）
+- direnv 向けの secret 注入（取得結果を確認してから評価）
 - secret 種別（runtime/admin）と exec は runtime のみ注入
 - Linux では `secret get` / `inject` / `exec` に TTY ガード
 - macOS では `secret get` / `inject` / `exec` に TTY ガード + device owner authentication
@@ -26,7 +26,7 @@ macOS を優先しつつ、Linux でも `secret-tool` を使った運用に対�
 
 - Python 3.14+
 - `direnv`
-- macOS Keychain（標準搭載）または Linux SecretService（`secret-tool`）
+- Apple Silicon / macOS 26 以降の Keychain、または Linux SecretService（`secret-tool`）
 - device owner authentication (TouchID or Apple Watch)
 
 ## インストール
@@ -34,7 +34,7 @@ macOS を優先しつつ、Linux でも `secret-tool` を使った運用に対�
 ### macOS（Homebrew）
 
 ```sh
-    brew intall rioriost/tap/envrcctl
+    brew install rioriost/tap/envrcctl
 ```
 
 direnvのインストールは以下です。
@@ -63,6 +63,9 @@ Apple Silicon (`arm64`) の macOS では、Homebrew で `envrcctl` をインス�
 通常は追加作業は不要です。  
 `secret get` / `inject` / `exec` の実行時に helper が見つからない場合のみ、
 インストール方法を確認してください。
+
+0.4.0 以降は Keychain への書き込みにも helper を使用し、所有者認証を求める場合があります。
+`--stdin` で値を渡しても認証を省略することはできません。
 
 Intel Mac (`x86_64`) は対象外です。
 
@@ -102,7 +105,8 @@ Intel Mac (`x86_64`) は対象外です。
     envrcctl init --inject
 ```
 
-管理ブロックに `eval "$(envrcctl inject)"` が追加されます。
+管理ブロックに `envrcctl inject --shell` の結果を確認する shell fragment が追加されます。
+取得・監査に失敗した場合は export を評価せず、呼び出し側にも失敗を伝えます。
 
 6. direnv を許可:
 
@@ -127,6 +131,7 @@ Intel Mac (`x86_64`) は対象外です。
     envrcctl secret set OPENAI_API_KEY --account openai:prod --kind runtime
     envrcctl secret set OPENAI_API_KEY --account openai:admin --kind admin
     envrcctl secret unset OPENAI_API_KEY
+    envrcctl secret unset OPENAI_API_KEY --delete
     envrcctl secret list
     envrcctl secret get OPENAI_API_KEY
     envrcctl secret get OPENAI_API_KEY --plain
@@ -137,6 +142,15 @@ CI 向け（標準入力）:
 ```sh
     echo -n "$OPENAI_API_KEY" | envrcctl secret set OPENAI_API_KEY --account openai:prod --stdin
 ```
+
+0.4.0 以降の `secret unset` は参照だけを解除し、共有する OS store の値は残します。
+値自体を削除するには `--delete` と確認が必要です（非対話で明示的に確認する場合は
+`--yes`）。同じ管理ブロック内に共有参照があれば削除を拒否します。
+別プロジェクトの参照は検出できないため、値を削除する前に利用先を確認してください。
+`kind` は注入ポリシーであり、別の保存先や OS のアクセス制御ではありません。
+
+`--stdin` は末尾改行を含め入力をそのまま保存します。通常の `echo` ではなく、
+`printf %s "$OPENAI_API_KEY"` などで不要な改行を付けずに渡してください。
 
 ### stdout に出さない exec
 
@@ -161,6 +175,11 @@ Linux では、非対話実行時に `--force` が必要です。
 macOS では、`_is_interactive` 相当の対話判定に加えて、Touch ID / Apple Watch を含む macOS の device owner authentication が必要です。  
 複数の runtime secret がある場合も、`inject` は 1 回の認証で対象 secret を一括取得します。
 
+生成される `--shell` は、制御端末があるプロセスに限って stdout の capture を許可します。
+TTY のない CI を対話環境として扱う機能ではありません。macOS の所有者認証は
+`--force` を指定しても省略されません。更新後は `envrcctl init --inject --yes` で
+旧形式の inject 行を更新し、変更内容を確認して `direnv allow` してください。
+
 ### 有効環境（マスク表示）
 
 ```sh
@@ -184,10 +203,21 @@ macOS では、`_is_interactive` 相当の対話判定に加えて、Touch ID / 
 監査ログには次の性質があります。
 
 - plaintext の secret value は保存しません
-- 環境変数名、secret ref metadata、作業ディレクトリ、`exec` の command metadata を保存します
+- 環境変数名、secret ref metadata、作業ディレクトリ、実行ファイル名を保存します
+- command の引数や外部コマンドの生のエラー文字列は保存しません
 - 各イベントを `prev_hash` と `hash` で連結し、過去イベントの改変や削除を検知可能にします
 
 `envrcctl audit verify` は、この hash chain を検証し、監査ログの改変が疑われる場合に失敗を報告します。
+
+verify と doctor は検査時に履歴や権限を修正しません。新規イベントは schema 2 ですが、
+既存の schema 1 の履歴も検証・継続できます。`exec` は子プロセスの起動前に
+`started` を永続化し、同じ `operation_id` で終了結果を記録します。
+終了記録のない start は「完了不明」であり、成功を意味しません。
+追記はプロセス間で排他制御し、不整合は黙って修復・初期化せずに拒否します。
+
+全履歴と sidecar の再計算や store 全体の削除は、このローカル hash chain では検出できません。
+旧履歴には command の引数が含まれる可能性があります。更新時に過去の記録を書き換えたり
+redact したりはしません。
 
 ### 診断
 
@@ -208,12 +238,16 @@ macOS では、`_is_interactive` 相当の対話判定に加えて、Touch ID / 
 
 未管理の export または secret ref が検出された場合は確認が求められます。非対話実行では `--yes` でスキップできます。
 
+移行対象は曖昧さのないリテラル代入に限ります。shell 展開、条件分岐、function、
+競合する代入は自動移行せず、元ファイルを保持してエラーにします。
+`--yes` はこの安全性検査を解除しません。
+
 ## バックエンド選択（macOS/Linux）
 
 バックエンドは自動選択されますが、`ENVRCCTL_BACKEND` で指定できます。
 
 - `kc` — macOS Keychain
-- `ss` — SecretService（`secret-tool`）
+- `ss` — Linux の SecretService（`secret-tool`）。macOS での選択は拒否します。
 
 例:
 

@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+# Usage: build_macos_auth_helper.sh [source.swift [output-path]]
+# For noninteractive build validation, pass a disposable output path in the repository;
+# do not replace the packaged helper during validation; release artifacts need signing/notarization.
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 SWIFT_SOURCE="${1:-$REPO_ROOT/scripts/macos/envrcctl-macos-auth.swift}"
@@ -37,6 +40,7 @@ xcrun --sdk macosx swiftc \
   -sdk "$(xcrun --sdk macosx --show-sdk-path)" \
   -target "arm64-apple-macosx${MACOSX_DEPLOYMENT_TARGET:-26.0}" \
   -O \
+  -parse-as-library \
   -framework LocalAuthentication \
   -framework Security \
   "$SWIFT_SOURCE" \

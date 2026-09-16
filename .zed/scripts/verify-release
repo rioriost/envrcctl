@@ -6,7 +6,7 @@ echo "==> verify-release: start"
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
   echo "==> macOS: build auth helper"
-  sh ./scripts/build_macos_auth_helper.sh
+  python3 scripts/release_artifacts.py --helper-only
 fi
 
 if command -v uv >/dev/null 2>&1; then

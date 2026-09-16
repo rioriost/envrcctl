@@ -1,6 +1,6 @@
 [project]
 name = "envrcctl"
-version = "0.3.2"
+version = "0.4.0"
 description = "Manage .envrc with managed blocks and OS-backed secrets."
 readme = { file = "README.md", content-type = "text/markdown" }
 license = "MIT"
@@ -15,7 +15,7 @@ dependencies = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/envrcctl"]
-exclude = ["src/envrcctl/envrcctl-macos-auth"]
+exclude = ["src/envrcctl/envrcctl-macos-auth*"]
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -28,7 +28,7 @@ include = [
     "pyproject.toml",
 ]
 exclude = [
-    "src/envrcctl/envrcctl-macos-auth",
+    "src/envrcctl/envrcctl-macos-auth*",
 ]
 
 [project.urls]

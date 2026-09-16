@@ -10,9 +10,7 @@ from envrcctl.errors import EnvrcctlError
 from tests.helpers.cli_support import DummyBackend
 
 
-def test_cli_secret_get_records_success_audit_event(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_secret_get_records_success_audit_event(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
     dummy = DummyBackend()
@@ -21,9 +19,7 @@ def test_cli_secret_get_records_success_audit_event(
     monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
-    monkeypatch.setattr(
-        cli, "append_event", lambda **kwargs: audit_calls.append(kwargs)
-    )
+    monkeypatch.setattr(cli, "append_event", lambda **kwargs: audit_calls.append(kwargs))
     monkeypatch.setattr(cli.sys, "platform", "linux")
 
     runner.invoke(cli.app, ["init"])
@@ -54,13 +50,12 @@ def test_cli_secret_get_records_success_audit_event(
             "platform": "linux",
             "command": None,
             "error": None,
+            "operation_id": None,
         }
     ]
 
 
-def test_cli_secret_get_records_failure_audit_event(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_secret_get_records_failure_audit_event(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
     dummy = DummyBackend()
@@ -73,9 +68,7 @@ def test_cli_secret_get_records_failure_audit_event(
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
     monkeypatch.setattr(dummy, "get", fake_get)
     monkeypatch.setattr(cli, "_is_interactive", lambda: False)
-    monkeypatch.setattr(
-        cli, "append_event", lambda **kwargs: audit_calls.append(kwargs)
-    )
+    monkeypatch.setattr(cli, "append_event", lambda **kwargs: audit_calls.append(kwargs))
     monkeypatch.setattr(cli.sys, "platform", "linux")
 
     runner.invoke(cli.app, ["init"])
@@ -105,7 +98,10 @@ def test_cli_secret_get_records_failure_audit_event(
             "cwd": tmp_path,
             "platform": "linux",
             "command": None,
-            "error": AuditErrorInfo(code="secret_get_failed", message="boom"),
+            "error": AuditErrorInfo(
+                code="secret_get_failed", message="EnvrcctlError: operation failed."
+            ),
+            "operation_id": None,
         }
     ]
 
@@ -163,9 +159,7 @@ def test_cli_secret_get_on_macos_requires_auth_for_clipboard_default(
     monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
     monkeypatch.setattr(dummy, "get_with_auth", fake_get_with_auth)
-    monkeypatch.setattr(
-        cli, "_copy_to_clipboard", lambda value: clipboard.append(value)
-    )
+    monkeypatch.setattr(cli, "_copy_to_clipboard", lambda value: clipboard.append(value))
     monkeypatch.setattr(cli.sys, "platform", "darwin")
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
 
@@ -203,9 +197,7 @@ def test_cli_secret_get_on_macos_fails_closed_when_auth_is_cancelled(
     monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
     monkeypatch.setattr(dummy, "get_with_auth", fake_get_with_auth)
-    monkeypatch.setattr(
-        cli, "_copy_to_clipboard", lambda value: clipboard.append(value)
-    )
+    monkeypatch.setattr(cli, "_copy_to_clipboard", lambda value: clipboard.append(value))
     monkeypatch.setattr(cli.sys, "platform", "darwin")
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
 
@@ -241,9 +233,7 @@ def test_cli_secret_get_copies_masked(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
-    monkeypatch.setattr(
-        cli, "_copy_to_clipboard", lambda value: copied.setdefault("value", value)
-    )
+    monkeypatch.setattr(cli, "_copy_to_clipboard", lambda value: copied.setdefault("value", value))
 
     runner.invoke(cli.app, ["init"])
     runner.invoke(
@@ -280,9 +270,7 @@ def test_cli_secret_get_plain_interactive(tmp_path: Path, monkeypatch) -> None:
     assert result.stdout.strip() == "supersecretvalue"
 
 
-def test_cli_secret_get_force_plain_non_interactive(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_secret_get_force_plain_non_interactive(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
     dummy = DummyBackend()

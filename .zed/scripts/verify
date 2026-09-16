@@ -4,12 +4,6 @@ cd "$(git rev-parse --show-toplevel)"
 
 echo "==> verify: start"
 
-mapfile -d '' status_entries < <(git status --porcelain -z)
-if (( ${#status_entries[@]} == 0 )); then
-  echo "==> verify: no changes; skipping"
-  exit 0
-fi
-
 has_python=0
 has_swift=0
 has_rust=0
@@ -17,24 +11,31 @@ has_macos_auth_helper=0
 sh_files=()
 bicep_files=()
 
-for entry in "${status_entries[@]}"; do
-  if [[ "$entry" == *" "* ]]; then
-    path="${entry#?? }"
-  else
-    path="$entry"
-  fi
+changed=0
+while IFS= read -r -d '' entry; do
+  changed=1
+  path="${entry#?? }"
+  # Porcelain -z emits the old name as a second record for renames/copies.
+  case "${entry:0:2}" in
+    *R*|*C*) IFS= read -r -d '' old_path || exit 1 ;;
+  esac
   case "$path" in
-    *.py|pyproject.toml|requirements.txt) has_python=1 ;;
-    *.swift|Package.swift) has_swift=1 ;;
     scripts/macos/envrcctl-macos-auth.swift|scripts/build_macos_auth_helper.sh)
       has_macos_auth_helper=1
       has_swift=1
       ;;
+    *.py|pyproject.toml|uv.lock|requirements.txt) has_python=1 ;;
+    *.swift|Package.swift) has_swift=1 ;;
     *.rs|Cargo.toml) has_rust=1 ;;
     *.sh) sh_files+=("$path") ;;
     *.bicep) bicep_files+=("$path") ;;
   esac
-done
+done < <(git status --porcelain -z --untracked-files=all)
+
+if (( changed == 0 )); then
+  echo "==> verify: no changes; skipping"
+  exit 0
+fi
 
 ran=0
 
@@ -42,30 +43,31 @@ have_cmd() { command -v "$1" >/dev/null 2>&1; }
 skip_cmd() { echo "==> $1: $2 not installed; skipping"; }
 
 if (( has_python == 1 )); then
-  if have_cmd python; then
-    if python -m pytest --version >/dev/null 2>&1; then
-      echo "==> python: pytest"
-      python -m pytest -q && ran=1 || exit 1
-    else
-      skip_cmd "python" "pytest"
+  if [[ -x .venv/bin/python ]]; then
+    python_cmd=(.venv/bin/python)
+  elif have_cmd uv; then
+    python_cmd=(uv run --no-sync python)
+  else
+    echo "ERROR: Project Python unavailable. Install uv and run: uv sync --locked --extra test --group dev" >&2
+    exit 1
+  fi
+  for module in pytest bandit; do
+    if ! "${python_cmd[@]}" -m "$module" --version >/dev/null 2>&1; then
+      echo "ERROR: Project $module unavailable. Run: uv sync --locked --extra test --group dev" >&2
+      exit 1
     fi
-  else
-    skip_cmd "python" "python"
-  fi
-  if have_cmd bandit; then
-    echo "==> python: bandit"
-    bandit -r src -x tests -s B404,B603,B607 && ran=1 || exit 1
-  else
-    skip_cmd "python" "bandit"
-  fi
+  done
+  echo "==> python: pytest"
+  "${python_cmd[@]}" -m pytest -q
+  ran=1
+  echo "==> python: bandit"
+  "${python_cmd[@]}" -m bandit -r src -x tests -s B404,B603,B607
 fi
 
 if (( has_macos_auth_helper == 1 )); then
   if have_cmd sh && have_cmd swiftc; then
     echo "==> macOS auth helper: build"
-    ./scripts/build_macos_auth_helper.sh \
-      scripts/macos/envrcctl-macos-auth.swift \
-      src/envrcctl/envrcctl-macos-auth && ran=1 || exit 1
+    python3 scripts/release_artifacts.py --helper-only && ran=1 || exit 1
   else
     skip_cmd "macOS auth helper" "sh/swiftc"
   fi

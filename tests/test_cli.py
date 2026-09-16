@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 
 from envrcctl import cli
 from envrcctl.envrc import ENVRC_FILENAME
+from envrcctl.managed_block import INJECT_LINE
 from tests.helpers.cli_support import read_envrc
 
 
@@ -35,7 +36,7 @@ def test_cli_init_set_get_list_unset(tmp_path: Path, monkeypatch) -> None:
     assert "FOO=bar" not in result.stdout
 
     envrc_text = read_envrc(tmp_path / ENVRC_FILENAME)
-    assert 'eval "$(envrcctl inject)"' in envrc_text
+    assert INJECT_LINE in envrc_text
 
 
 def test_cli_set_adds_inject_line_when_requested(tmp_path: Path, monkeypatch) -> None:
@@ -47,7 +48,7 @@ def test_cli_set_adds_inject_line_when_requested(tmp_path: Path, monkeypatch) ->
     assert result.exit_code == 0
 
     envrc_text = read_envrc(tmp_path / ENVRC_FILENAME)
-    assert 'eval "$(envrcctl inject)"' in envrc_text
+    assert INJECT_LINE in envrc_text
 
 
 def test_cli_inherit_on_off(tmp_path: Path, monkeypatch) -> None:

@@ -5,8 +5,8 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from envrcctl import cli
+from envrcctl.audit import ensure_audit_store_secure
 from envrcctl.envrc import ENVRC_FILENAME
-from envrcctl.errors import EnvrcctlError
 from envrcctl.managed_block import ManagedBlock, render_managed_block
 
 
@@ -15,9 +15,7 @@ def test_cli_doctor_warns_on_symlink(tmp_path: Path, monkeypatch) -> None:
     runner = CliRunner()
 
     target = tmp_path / "real.envrc"
-    target.write_text(
-        render_managed_block(ManagedBlock(include_inject=True)), encoding="utf-8"
-    )
+    target.write_text(render_managed_block(ManagedBlock(include_inject=True)), encoding="utf-8")
     envrc_path = tmp_path / ENVRC_FILENAME
     envrc_path.symlink_to(target)
 
@@ -39,9 +37,7 @@ def test_cli_doctor_warns_on_group_writable(tmp_path: Path, monkeypatch) -> None
     assert "group-writable" in result.stderr
 
 
-def test_cli_doctor_warns_for_unmanaged_and_missing_inject(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_doctor_warns_for_unmanaged_and_missing_inject(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
@@ -69,9 +65,7 @@ def test_cli_doctor_warns_for_plaintext_secrets(tmp_path: Path, monkeypatch) -> 
     runner = CliRunner()
 
     block = ManagedBlock(exports={"API_TOKEN": "plaintext"}, include_inject=True)
-    (tmp_path / ENVRC_FILENAME).write_text(
-        render_managed_block(block), encoding="utf-8"
-    )
+    (tmp_path / ENVRC_FILENAME).write_text(render_managed_block(block), encoding="utf-8")
 
     result = runner.invoke(cli.app, ["doctor"])
     assert result.exit_code == 0
@@ -112,9 +106,7 @@ def test_doctor_ok_when_no_warnings(tmp_path: Path, monkeypatch) -> None:
     runner = CliRunner()
 
     block = ManagedBlock(include_inject=True)
-    (tmp_path / ENVRC_FILENAME).write_text(
-        render_managed_block(block), encoding="utf-8"
-    )
+    (tmp_path / ENVRC_FILENAME).write_text(render_managed_block(block), encoding="utf-8")
     monkeypatch.setattr(
         cli,
         "verify_chain",
@@ -131,23 +123,18 @@ def test_doctor_ok_when_no_warnings(tmp_path: Path, monkeypatch) -> None:
             },
         )(),
     )
-    monkeypatch.setattr(cli, "ensure_audit_store_secure", lambda: None)
 
     result = runner.invoke(cli.app, ["doctor"])
     assert result.exit_code == 0
     assert result.stdout.strip() == "OK"
 
 
-def test_doctor_warns_when_audit_chain_verification_fails(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_doctor_warns_when_audit_chain_verification_fails(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
     block = ManagedBlock(include_inject=True)
-    (tmp_path / ENVRC_FILENAME).write_text(
-        render_managed_block(block), encoding="utf-8"
-    )
+    (tmp_path / ENVRC_FILENAME).write_text(render_managed_block(block), encoding="utf-8")
     monkeypatch.setattr(
         cli,
         "verify_chain",
@@ -173,41 +160,17 @@ def test_doctor_warns_when_audit_chain_verification_fails(
     assert "reason=Audit event hash mismatch." in result.stderr
 
 
-def test_doctor_warns_when_audit_store_is_not_secure(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_doctor_warns_when_audit_store_is_not_secure(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
     block = ManagedBlock(include_inject=True)
-    (tmp_path / ENVRC_FILENAME).write_text(
-        render_managed_block(block), encoding="utf-8"
-    )
-    monkeypatch.setattr(
-        cli,
-        "verify_chain",
-        lambda: type(
-            "AuditVerifyResultStub",
-            (),
-            {
-                "ok": True,
-                "event_count": 0,
-                "latest_hash": None,
-                "failure_line": None,
-                "failure_event_id": None,
-                "failure_reason": None,
-            },
-        )(),
-    )
-
-    def fake_ensure_audit_store_secure() -> None:
-        raise EnvrcctlError("permissions are insecure")
-
-    monkeypatch.setattr(
-        cli, "ensure_audit_store_secure", fake_ensure_audit_store_secure
-    )
+    (tmp_path / ENVRC_FILENAME).write_text(render_managed_block(block), encoding="utf-8")
+    directory = ensure_audit_store_secure()
+    directory.chmod(0o755)
 
     result = runner.invoke(cli.app, ["doctor"])
     assert result.exit_code == 0
-    assert "audit store is not secure" in result.stderr
+    assert "audit chain verification failed" in result.stderr
     assert "permissions are insecure" in result.stderr
+    assert directory.stat().st_mode & 0o777 == 0o755

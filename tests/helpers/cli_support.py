@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict
 
 
 class DummyBackend:
     def __init__(self) -> None:
-        self._store: Dict[tuple[str, str], str] = {}
+        self._store: dict[tuple[str, str], str] = {}
 
     def get(self, ref) -> str:
         return self._store[(ref.service, ref.account)]

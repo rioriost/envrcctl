@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 
 from envrcctl import cli
 from envrcctl.envrc import ENVRC_FILENAME
+from envrcctl.managed_block import INJECT_LINE
 from tests.helpers.cli_support import DummyBackend, read_envrc
 
 
@@ -35,7 +36,7 @@ def test_cli_secret_set_inject_unset(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0
     envrc_text = read_envrc(tmp_path / ENVRC_FILENAME)
     assert "ENVRCCTL_SECRET_OPENAI_API_KEY" in envrc_text
-    assert 'eval "$(envrcctl inject)"' in envrc_text
+    assert INJECT_LINE in envrc_text
 
     monkeypatch.setattr(cli.sys, "platform", "linux")
 
@@ -49,9 +50,7 @@ def test_cli_secret_set_inject_unset(tmp_path: Path, monkeypatch) -> None:
     assert "ENVRCCTL_SECRET_OPENAI_API_KEY" not in envrc_text
 
 
-def test_cli_secret_unset_preserves_shared_keychain_item(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_secret_unset_preserves_shared_keychain_item(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
     dummy = DummyBackend()
@@ -110,9 +109,7 @@ def test_secret_set_uses_getpass(tmp_path: Path, monkeypatch) -> None:
     assert "ENVRCCTL_SECRET_TOKEN" in envrc_text
 
 
-def test_secret_set_rejects_mismatched_confirmation(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_secret_set_rejects_mismatched_confirmation(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
     dummy = DummyBackend()

@@ -129,6 +129,7 @@ def test_backend_for_scheme_kc_requires_darwin(monkeypatch) -> None:
 
 
 def test_backend_for_scheme_ss_requires_secret_tool(monkeypatch) -> None:
+    monkeypatch.setattr(secrets.sys, "platform", "linux")
     monkeypatch.setattr(secrets, "_have_cmd", lambda cmd: False)
 
     with pytest.raises(EnvrcctlError):
@@ -168,11 +169,10 @@ def test_backend_for_scheme_returns_secretservice(monkeypatch) -> None:
         pass
 
     monkeypatch.setattr(secrets, "_have_cmd", lambda cmd: True)
+    monkeypatch.setattr(secrets.sys, "platform", "linux")
     import envrcctl.secretservice as secretservice
 
-    monkeypatch.setattr(
-        secretservice, "SecretServiceBackend", DummySecretServiceBackend
-    )
+    monkeypatch.setattr(secretservice, "SecretServiceBackend", DummySecretServiceBackend)
 
     backend = secrets._backend_for_scheme("ss")
     assert isinstance(backend, DummySecretServiceBackend)
@@ -184,3 +184,31 @@ def test_have_cmd_checks_path(monkeypatch) -> None:
 
     monkeypatch.setattr(secrets.shutil, "which", lambda cmd: None)
     assert secrets._have_cmd("missing") is False
+
+
+@pytest.mark.parametrize("selection", ["explicit", "environment", "reference"])
+def test_macos_rejects_secretservice_before_command_lookup(monkeypatch, selection) -> None:
+    monkeypatch.setattr(secrets.sys, "platform", "darwin")
+    calls = []
+    monkeypatch.setattr(secrets, "_have_cmd", lambda cmd: calls.append(cmd))
+    monkeypatch.setenv("ENVRCCTL_BACKEND", "ss")
+    with pytest.raises(EnvrcctlError, match="mandatory device owner authentication.*kc"):
+        if selection == "reference":
+            secrets.backend_for_ref(secrets.SecretRef("ss", "svc", "acct", "runtime"))
+        else:
+            secrets.resolve_backend("ss" if selection == "explicit" else None)
+    assert calls == []
+
+
+def test_backend_authentication_capabilities_are_structural() -> None:
+    from envrcctl.keychain import KeychainBackend
+    from envrcctl.secretservice import SecretServiceBackend
+
+    keychain = KeychainBackend()
+    secretservice = SecretServiceBackend()
+    assert isinstance(keychain, secrets.AuthenticatedSecretBackend)
+    assert not isinstance(secretservice, secrets.AuthenticatedSecretBackend)
+    assert not hasattr(secretservice, "get_with_auth")
+    assert not hasattr(secretservice, "get_many_with_auth")
+    assert secrets.SecretBackend not in type(secretservice).__mro__
+    assert secrets.SecretBackend not in type(keychain).__mro__

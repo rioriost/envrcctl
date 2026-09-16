@@ -18,18 +18,14 @@ def test_secret_list_outputs_refs(tmp_path: Path, monkeypatch) -> None:
         secret_refs={"TOKEN": "kc:svc:acct"},
         include_inject=False,
     )
-    (tmp_path / ENVRC_FILENAME).write_text(
-        render_managed_block(block), encoding="utf-8"
-    )
+    (tmp_path / ENVRC_FILENAME).write_text(render_managed_block(block), encoding="utf-8")
 
     result = runner.invoke(cli.app, ["secret", "list"])
     assert result.exit_code == 0
     assert "TOKEN=kc:svc:acct" in result.stdout
 
 
-def test_cli_outputs_do_not_leak_secret_except_inject(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_outputs_do_not_leak_secret_except_inject(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
     dummy = DummyBackend()

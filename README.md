@@ -12,7 +12,7 @@ It is designed for macOS first, with Linux support via SecretService.
 - Secrets stored in Keychain (macOS) or SecretService (Linux)
 - Inheritance control (`source_up` on/off)
 - Exec-based secret injection (`envrcctl exec -- ...`, TTY-guarded on Linux, TTY + macOS auth on macOS)
-- Secret injection for direnv (`eval "$(envrcctl inject)"`, TTY-guarded on Linux, TTY + macOS auth on macOS)
+- Secret injection for direnv (checked shell capture with terminal guard and macOS authentication)
 - Secret kinds (runtime/admin), with exec injecting runtime only
 - Secret get with clipboard default and TTY guard on Linux, plus macOS auth on macOS
 - On macOS, `inject` and `exec` retrieve multiple runtime secrets with a single device owner authentication prompt
@@ -24,7 +24,7 @@ It is designed for macOS first, with Linux support via SecretService.
 
 - Python 3.14+
 - `direnv`
-- macOS Keychain (built-in) or Linux SecretService (`secret-tool`)
+- macOS 26+ on Apple Silicon with Keychain, or Linux SecretService (`secret-tool`)
 - device owner authentication (TouchID or Apple Watch)
 
 ## Installation
@@ -66,6 +66,9 @@ uv tool install envrcctl
 
 The macOS device owner authentication flow requires a native helper named
 `envrcctl-macos-auth`.
+
+Keychain writes also use this helper and can request owner authentication, even
+when the value is supplied with `--stdin`. Piped input is not an authentication bypass.
 
 Homebrew on Apple Silicon is intended to install this helper automatically, so
 you should not need to build it yourself in the common case.
@@ -131,7 +134,8 @@ envrcctl secret set OPENAI_API_KEY --account openai:prod
 envrcctl init --inject
 ```
 
-This inserts `eval "$(envrcctl inject)"` into the managed block.
+This inserts a checked `envrcctl inject --shell` capture into the managed block.
+It evaluates exports only after successful retrieval and audit recording.
 
 6. Allow direnv:
 
@@ -156,10 +160,18 @@ envrcctl list
 envrcctl secret set OPENAI_API_KEY --account openai:prod --kind runtime
 envrcctl secret set OPENAI_API_KEY --account openai:admin --kind admin
 envrcctl secret unset OPENAI_API_KEY
+envrcctl secret unset OPENAI_API_KEY --delete
 envrcctl secret list
 envrcctl secret get OPENAI_API_KEY
 envrcctl secret get OPENAI_API_KEY --plain
 ```
+
+Since 0.4.0, `secret unset` only removes the local reference, preserving the shared
+OS-store item. `--delete` also deletes that item after confirmation (`--yes` for
+explicit non-interactive confirmation). Deletion is refused when another local
+reference uses the same item. Other projects may still reference it: delete only
+when you have checked those consumers. `kind` is injection policy, not a separate
+storage identity or access-control boundary.
 
 `envrcctl secret get` behavior is platform-specific:
 
@@ -173,6 +185,9 @@ For CI-safe input:
 ```sh
 echo -n "$OPENAI_API_KEY" | envrcctl secret set OPENAI_API_KEY --account openai:prod --stdin
 ```
+
+`--stdin` preserves input exactly, including trailing newlines. Prefer
+`printf %s "$OPENAI_API_KEY"` instead of plain `echo`.
 
 ### Exec secrets without stdout
 
@@ -198,6 +213,12 @@ envrcctl inject
 ```
 
 Linux keeps the current behavior: non-interactive runs are blocked unless `--force` is provided.
+
+The generated `--shell` form permits captured stdout only when the process has a
+controlling terminal; it does not turn unattended CI into an interactive session.
+On macOS it still requires device owner authentication, including with `--force`.
+After upgrading, run `envrcctl init --inject --yes` and review/allow the updated
+`.envrc` to replace legacy unchecked inject lines.
 
 On macOS, `envrcctl inject` requires both:
 - the existing interactive-shell check
@@ -234,7 +255,7 @@ envrcctl audit verify
 The audit log:
 
 - never stores plaintext secret values
-- stores variable names, secret ref metadata, working directory, and `exec` command metadata
+- stores variable names, secret ref metadata, working directory, and the executable name only (not command arguments or raw external errors)
 - chains events with `prev_hash` and `hash` so silent modification or deletion is detectable
 
 Default audit log storage locations:
@@ -250,6 +271,16 @@ The audit store currently uses:
 - `meta.json` for metadata
 
 `envrcctl audit verify` checks the hash chain and reports failures if audit records appear to have been modified.
+
+Verification and `doctor` do not repair permissions or rewrite history. New
+schema-2 events can extend existing schema-1 chains. `exec` records a durable
+`started` event before launching its child, then a result with the same
+`operation_id`; an unmatched start means completion is unknown, not successful.
+Concurrent writers are serialized. Inconsistent history fails closed and must
+be investigated before retrying; do not delete logs to suppress a failure.
+The hash chain cannot detect an attacker rewriting all history and sidecar files,
+or deleting the entire store. Old records may contain raw command arguments;
+upgrading does not rewrite or redact those historical records.
 
 ### Diagnostics
 
@@ -270,6 +301,11 @@ envrcctl migrate
 
 You'll be prompted when unmanaged exports or secret refs are detected. Use `--yes` to confirm in non-interactive runs.
 
+Migration accepts only unambiguous literal assignments. Dynamic shell expressions,
+conditional/function bodies, and conflicting assignments require manual review;
+the command refuses rather than changing their meaning. `--yes` does not bypass
+these safety checks.
+
 ## Backend Selection (macOS/Linux)
 
 envrcctl selects a backend automatically by platform, or via `ENVRCCTL_BACKEND`.
@@ -277,7 +313,7 @@ envrcctl selects a backend automatically by platform, or via `ENVRCCTL_BACKEND`.
 Supported schemes:
 
 - `kc` — macOS Keychain
-- `ss` — SecretService via `secret-tool`
+- `ss` — SecretService via `secret-tool` on Linux only (rejected on macOS)
 
 Example:
 

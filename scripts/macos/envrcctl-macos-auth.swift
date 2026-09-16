@@ -33,6 +33,7 @@ enum HelperError: Error, LocalizedError {
 
 struct Arguments {
     let authorizeOnly: Bool
+    let set: Bool
     let service: String?
     let account: String?
     let inputJSONPath: String?
@@ -75,9 +76,11 @@ private func printHelpAndExit() -> Never {
           envrcctl-macos-auth --authorize-only --reason <text>
           envrcctl-macos-auth --service <service> --account <account> --reason <text>
           envrcctl-macos-auth --input-json <path|- > --reason <text>
+          envrcctl-macos-auth --set --service <service> --account <account> --reason <text>
 
         Options:
           --authorize-only   Require device owner authentication only.
+          --set              Create/update using exact UTF-8 stdin through EOF, without framing.
           --service          Keychain service name.
           --account          Keychain account name.
           --input-json       JSON file path or '-' for stdin for bulk reads.
@@ -98,6 +101,7 @@ private func printHelpAndExit() -> Never {
 
 private func parseArguments(_ argv: [String]) throws -> Arguments {
     var authorizeOnly = false
+    var set = false
     var service: String?
     var account: String?
     var inputJSONPath: String?
@@ -109,6 +113,9 @@ private func parseArguments(_ argv: [String]) throws -> Arguments {
         switch arg {
         case "--authorize-only":
             authorizeOnly = true
+            index += 1
+        case "--set":
+            set = true
             index += 1
         case "--service":
             guard index + 1 < argv.count else {
@@ -137,7 +144,7 @@ private func parseArguments(_ argv: [String]) throws -> Arguments {
         case "--help", "-h":
             printHelpAndExit()
         default:
-            throw HelperError.invalidArguments("Unknown argument: \(arg)")
+            throw HelperError.invalidArguments("Unknown argument.")
         }
     }
 
@@ -146,13 +153,14 @@ private func parseArguments(_ argv: [String]) throws -> Arguments {
     }
 
     if authorizeOnly {
-        if service != nil || account != nil || inputJSONPath != nil {
+        if set || service != nil || account != nil || inputJSONPath != nil {
             throw HelperError.invalidArguments(
-                "--authorize-only cannot be combined with --service, --account, or --input-json."
+                "--authorize-only cannot be combined with --set, --service, --account, or --input-json."
             )
         }
         return Arguments(
             authorizeOnly: true,
+            set: false,
             service: nil,
             account: nil,
             inputJSONPath: nil,
@@ -168,10 +176,14 @@ private func parseArguments(_ argv: [String]) throws -> Arguments {
             "--input-json cannot be combined with --service or --account."
         )
     }
+    if set && hasBulk {
+        throw HelperError.invalidArguments("--set cannot be combined with --input-json.")
+    }
 
     if hasBulk {
         return Arguments(
             authorizeOnly: false,
+            set: false,
             service: nil,
             account: nil,
             inputJSONPath: inputJSONPath,
@@ -188,6 +200,7 @@ private func parseArguments(_ argv: [String]) throws -> Arguments {
 
     return Arguments(
         authorizeOnly: false,
+        set: set,
         service: service,
         account: account,
         inputJSONPath: nil,
@@ -261,6 +274,48 @@ private func readSecret(service: String, account: String, context: LAContext) th
     return value
 }
 
+private func defaultKeychain() throws -> Any {
+    var keychain: SecKeychain?
+    let status = SecKeychainCopyDefault(&keychain)
+    guard status == errSecSuccess, let keychain else {
+        throw HelperError.keychainFailure("Failed to open the default Keychain.")
+    }
+    return keychain
+}
+
+func storeSecret(
+    service: String, account: String, data: Data, context: LAContext,
+    keychain: () throws -> Any = defaultKeychain,
+    update: (CFDictionary, CFDictionary) -> OSStatus = SecItemUpdate,
+    add: (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus = SecItemAdd
+) throws {
+    let destination = try keychain()
+    let identity: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: service,
+        kSecAttrAccount as String: account,
+        kSecUseAuthenticationContext as String: context,
+    ]
+    var query = identity
+    query[kSecMatchSearchList as String] = [destination]
+    let changes: [String: Any] = [kSecValueData as String: data]
+
+    // Update only the value: never delete/recreate or replace an existing item's ACL.
+    var status = update(query as CFDictionary, changes as CFDictionary)
+    if status == errSecItemNotFound {
+        var attributes = identity
+        attributes[kSecUseKeychain as String] = destination
+        attributes[kSecValueData as String] = data
+        status = add(attributes as CFDictionary, nil)
+        if status == errSecDuplicateItem {
+            status = update(query as CFDictionary, changes as CFDictionary)
+        }
+    }
+    guard status == errSecSuccess else {
+        throw HelperError.keychainFailure("Keychain write failed.")
+    }
+}
+
 private func readBulkRequest(from path: String) throws -> BulkRequest {
     let data: Data
     if path == "-" {
@@ -306,35 +361,59 @@ private func writeBulkResponse(_ response: BulkResponse) throws {
     FileHandle.standardOutput.write(data)
 }
 
-do {
-    let args = try parseArguments(CommandLine.arguments)
-    let context = try authenticate(reason: args.reason)
+func runHelper(
+    _ argv: [String],
+    authorize: (String) throws -> LAContext = authenticate,
+    read: (String, String, LAContext) throws -> String = readSecret,
+    store: (String, String, Data, LAContext) throws -> Void = {
+        try storeSecret(service: $0, account: $1, data: $2, context: $3)
+    }
+) throws {
+    let args = try parseArguments(argv)
+    let request = try args.inputJSONPath.map { try readBulkRequest(from: $0) }
+    let input = args.set ? FileHandle.standardInput.readDataToEndOfFile() : nil
+    if let input, String(data: input, encoding: .utf8) == nil {
+        throw HelperError.invalidArguments("Secret input must be valid UTF-8.")
+    }
+    let context = try authorize(args.reason)
 
     if args.authorizeOnly {
-        exit(0)
+        return
     }
 
-    if let inputJSONPath = args.inputJSONPath {
-        let request = try readBulkRequest(from: inputJSONPath)
+    if let request {
         let items = try request.items.map { item in
             BulkResponseItem(
                 service: item.service,
                 account: item.account,
-                value: try readSecret(
-                    service: item.service, account: item.account, context: context)
+                value: try read(item.service, item.account, context)
             )
         }
         try writeBulkResponse(BulkResponse(items: items))
-        exit(0)
+        return
     }
 
     guard let service = args.service, let account = args.account else {
         throw HelperError.invalidArguments("Both --service and --account are required.")
     }
 
-    let secret = try readSecret(service: service, account: account, context: context)
-    FileHandle.standardOutput.write(Data(secret.utf8))
-    exit(0)
-} catch {
-    printErrorAndExit(error)
+    if let input {
+        try store(service, account, input, context)
+    } else {
+        let secret = try read(service, account, context)
+        FileHandle.standardOutput.write(Data(secret.utf8))
+    }
 }
+
+#if !ENVRCCTL_HELPER_TESTING
+@main
+struct Main {
+    static func main() {
+        do {
+            try runHelper(CommandLine.arguments)
+        } catch {
+            printErrorAndExit(error)
+        }
+    }
+}
+#endif

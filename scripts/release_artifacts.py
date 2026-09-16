@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -10,7 +11,12 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import zipfile
 from pathlib import Path
+
+HELPER_NAME = "envrcctl-macos-auth"
+MINIMUM_MACOS = "26.0"
+PROVENANCE_NAME = "release-provenance.json"
 
 
 def run(cmd: list[str], *, cwd: Path) -> None:
@@ -172,13 +178,9 @@ def dist_dir(repo_root: Path) -> Path:
     return repo_root / "dist"
 
 
-def helper_output_path(repo_root: Path) -> Path:
-    return repo_root / "src" / "envrcctl" / "envrcctl-macos-auth"
-
-
-def generate_completions(repo_root: Path) -> None:
-    require_command("uv")
-    run(["uv", "run", "python", "scripts/generate_completions.py"], cwd=repo_root)
+def generate_completions(repo_root: Path, uv: str = "uv") -> None:
+    require_command(uv)
+    run([uv, "run", "--locked", "python", "scripts/generate_completions.py"], cwd=repo_root)
 
     expected = [
         repo_root / "completions" / "envrcctl.bash",
@@ -191,62 +193,281 @@ def generate_completions(repo_root: Path) -> None:
         raise RuntimeError(f"Completion generation did not create expected files: {joined}")
 
 
-def sync_dev_environment(repo_root: Path) -> None:
-    require_command("uv")
-    run(["uv", "sync", "--extra", "test", "--group", "dev"], cwd=repo_root)
+def sync_dev_environment(repo_root: Path, uv: str = "uv") -> None:
+    require_command(uv)
+    run([uv, "sync", "--locked", "--extra", "test", "--group", "dev"], cwd=repo_root)
 
 
-def clean_dist(repo_root: Path) -> None:
-    out = dist_dir(repo_root)
-    if out.exists():
-        shutil.rmtree(out)
-    out.mkdir(parents=True, exist_ok=True)
+def validate_python_artifacts(sdist: Path, wheel: Path) -> None:
+    with tarfile.open(sdist, "r:gz") as archive:
+        members = archive.getmembers()
+        if not members or any(not (m.isfile() or m.isdir()) for m in members):
+            raise RuntimeError("Invalid sdist members")
+        source_names = [m.name for m in members]
+    with zipfile.ZipFile(wheel) as archive:
+        if archive.testzip() is not None:
+            raise RuntimeError("Invalid wheel checksum")
+        wheel_names = archive.namelist()
+        entrypoints = [n for n in wheel_names if n.endswith(".dist-info/entry_points.txt")]
+        if len(entrypoints) != 1 or b"envrcctl.main:main" not in archive.read(entrypoints[0]):
+            raise RuntimeError("Missing envrcctl wheel entrypoint")
+    for name in source_names + wheel_names:
+        path = Path(name)
+        if path.is_absolute() or ".." in path.parts:
+            raise RuntimeError(f"Unsafe Python archive member: {name}")
+        if "envrcctl" in path.parts and path.name.startswith(HELPER_NAME):
+            raise RuntimeError(f"Native helper or backup in Python artifact: {name}")
+    if not any(n.endswith("/src/envrcctl/main.py") for n in source_names):
+        raise RuntimeError("Missing envrcctl source in sdist")
+    if "envrcctl/main.py" not in wheel_names:
+        raise RuntimeError("Missing envrcctl source in wheel")
+    for shell in ("bash", "zsh", "fish"):
+        if not any(n.endswith(f"/completions/envrcctl.{shell}") for n in source_names):
+            raise RuntimeError(f"Missing {shell} completion in sdist")
 
 
-def build_python_artifacts(repo_root: Path) -> tuple[Path, Path]:
-    require_command("uv")
-    run(["uv", "build"], cwd=repo_root)
+def build_python_artifacts(repo_root: Path, output: Path, uv: str = "uv") -> tuple[Path, Path]:
+    require_command(uv)
+    run([uv, "build", "--out-dir", str(output)], cwd=repo_root)
 
     version = project_version(repo_root / "pyproject.toml")
-    sdist = dist_dir(repo_root) / f"envrcctl-{version}.tar.gz"
-    wheel = dist_dir(repo_root) / f"envrcctl-{version}-py3-none-any.whl"
-
-    if not sdist.exists():
-        raise RuntimeError(f"Expected sdist was not created: {sdist}")
-    if not wheel.exists():
-        raise RuntimeError(f"Expected wheel was not created: {wheel}")
-
+    sdist = output / f"envrcctl-{version}.tar.gz"
+    wheel = output / f"envrcctl-{version}-py3-none-any.whl"
+    validate_python_artifacts(sdist, wheel)
     return sdist, wheel
 
 
-def build_helper_binary(repo_root: Path) -> Path:
+def validate_helper_binary(helper: Path, repo_root: Path) -> None:
     ensure_macos_arm64()
-    run(["sh", "scripts/build_macos_auth_helper.sh"], cwd=repo_root)
+    metadata = subprocess.run(
+        ["xcrun", "vtool", "-show-build", str(helper)],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    architectures = subprocess.run(
+        ["xcrun", "lipo", "-archs", str(helper)],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    minimums = re.findall(r"^\s*minos\s+(\S+)", metadata, re.MULTILINE)
+    platforms = re.findall(r"^\s*platform\s+(\S+)", metadata, re.MULTILINE)
+    if architectures != "arm64" or minimums != [MINIMUM_MACOS] or platforms != ["MACOS"]:
+        raise RuntimeError(f"Helper must target arm64 macOS {MINIMUM_MACOS}")
+    result = subprocess.run(
+        [str(helper), "--help"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if "Usage:" not in result.stdout or HELPER_NAME not in result.stdout:
+        raise RuntimeError("Helper --help did not return its usage")
 
-    helper_path = helper_output_path(repo_root)
-    if not helper_path.exists():
-        raise RuntimeError(f"Expected helper binary was not created: {helper_path}")
-    if not helper_path.is_file():
-        raise RuntimeError(f"Helper path is not a file: {helper_path}")
+
+def build_helper_binary(repo_root: Path, output: Path) -> Path:
+    ensure_macos_arm64()
+    helper_path = output / HELPER_NAME
+    run(
+        [
+            "sh",
+            "scripts/build_macos_auth_helper.sh",
+            str(repo_root / "scripts/macos/envrcctl-macos-auth.swift"),
+            str(helper_path),
+        ],
+        cwd=repo_root,
+    )
+    validate_helper_binary(helper_path, repo_root)
     return helper_path
 
 
-def package_helper_archive(repo_root: Path, version: str, helper_binary: Path) -> Path:
-    archive_path = dist_dir(repo_root) / f"envrcctl-macos-auth-{version}-arm64.tar.gz"
+def sign_helper(
+    repo_root: Path,
+    helper: Path,
+    identity: str | None,
+    notary_profile: str | None,
+) -> None:
+    if identity:
+        run(
+            [
+                "codesign",
+                "--force",
+                "--options",
+                "runtime",
+                "--timestamp",
+                "--sign",
+                identity,
+                str(helper),
+            ],
+            cwd=repo_root,
+        )
+        run(["codesign", "--verify", "--strict", "--verbose=2", str(helper)], cwd=repo_root)
+    if notary_profile:
+        submission = helper.parent / "helper-notarization.zip"
+        run(
+            ["ditto", "-c", "-k", "--keepParent", str(helper), str(submission)],
+            cwd=repo_root,
+        )
+        result = subprocess.run(
+            [
+                "xcrun",
+                "notarytool",
+                "submit",
+                str(submission),
+                "--keychain-profile",
+                notary_profile,
+                "--wait",
+                "--output-format",
+                "json",
+            ],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        response = json.loads(result.stdout)
+        if response.get("status") != "Accepted":
+            raise RuntimeError(f"Helper notarization was not accepted: {result.stdout}")
+        print(f"Helper notarization accepted: {response.get('id')}")
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        stage_dir = Path(tmpdir)
-        staged_binary = stage_dir / "envrcctl-macos-auth"
-        shutil.copy2(helper_binary, staged_binary)
-        staged_binary.chmod(0o755)
 
-        with tarfile.open(archive_path, "w:gz") as tf:
-            tf.add(staged_binary, arcname="envrcctl-macos-auth")
+def validate_helper_archive(archive: Path, expected_sha256: str | None = None) -> None:
+    with tarfile.open(archive, "r:gz") as tf:
+        members = tf.getmembers()
+        if len(members) != 1:
+            raise RuntimeError("Helper archive must have exactly one member")
+        member = members[0]
+        if (
+            member.name != HELPER_NAME
+            or not member.isfile()
+            or member.mode & 0o7777 != 0o755
+            or member.size == 0
+        ):
+            raise RuntimeError("Helper archive must contain only an executable regular helper")
+        stream = tf.extractfile(member)
+        assert stream is not None
+        with stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        if expected_sha256 is not None and digest != expected_sha256:
+            raise RuntimeError("Archived helper checksum does not match the built helper")
 
-    if not archive_path.exists():
-        raise RuntimeError(f"Expected helper archive was not created: {archive_path}")
 
+def package_helper_archive(
+    repo_root: Path,
+    version: str,
+    helper_binary: Path,
+    output: Path,
+) -> Path:
+    archive_path = output / f"envrcctl-macos-auth-{version}-arm64.tar.gz"
+    with tempfile.TemporaryDirectory(prefix=".helper-stage-", dir=output) as staging:
+        stage = Path(staging)
+        pending = stage / "helper.tar.gz"
+        # Save the failing operation's status before cleanup; never publish a partial tarball.
+        run(
+            [
+                "sh",
+                "-c",
+                """
+set -eu
+trap 'status=$?; trap - 0; rm -f "$1/envrcctl-macos-auth" || :; exit "$status"' 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+cp "$2" "$1/envrcctl-macos-auth"
+chmod 755 "$1/envrcctl-macos-auth"
+COPYFILE_DISABLE=1 tar -C "$1" -czf "$1/helper.tar.gz" envrcctl-macos-auth
+""",
+                "package-helper",
+                str(stage),
+                str(helper_binary),
+            ],
+            cwd=repo_root,
+        )
+        validate_helper_archive(pending, sha256_file(helper_binary))
+        pending.replace(archive_path)
     return archive_path
+
+
+def input_hashes(repo_root: Path) -> dict[str, str]:
+    paths = [
+        repo_root / name
+        for name in ("pyproject.toml", "uv.lock", "Makefile", "README.md", "LICENSE")
+    ]
+    for directory in ("src", "scripts", "tests", "completions"):
+        paths.extend(
+            p
+            for p in (repo_root / directory).rglob("*")
+            if p.is_file()
+            and "__pycache__" not in p.parts
+            and not p.name.endswith((".pyc", ".pyo"))
+            and not (p.parent == repo_root / "src/envrcctl" and p.name.startswith(HELPER_NAME))
+        )
+    paths.extend(
+        repo_root / name
+        for name in (".gitignore", ".python-version", "uv.toml", "hatch.toml")
+        if (repo_root / name).is_file()
+    )
+    return {p.relative_to(repo_root).as_posix(): sha256_file(p) for p in sorted(set(paths))}
+
+
+def artifact_paths(output: Path, version: str) -> tuple[Path, Path, Path]:
+    return (
+        output / f"envrcctl-{version}.tar.gz",
+        output / f"envrcctl-{version}-py3-none-any.whl",
+        output / f"envrcctl-macos-auth-{version}-arm64.tar.gz",
+    )
+
+
+def write_provenance(
+    output: Path,
+    version: str,
+    inputs: dict[str, str],
+    artifacts: tuple[Path, ...],
+) -> Path:
+    provenance = output / PROVENANCE_NAME
+    provenance.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "version": version,
+                "minimum_macos": MINIMUM_MACOS,
+                "inputs": inputs,
+                "artifacts": {p.name: sha256_file(p) for p in artifacts},
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return provenance
+
+
+def verify_provenance(repo_root: Path, version: str) -> tuple[Path, Path, Path]:
+    output = dist_dir(repo_root)
+    try:
+        data = json.loads((output / PROVENANCE_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(
+            "Missing or invalid release provenance; rebuild release artifacts"
+        ) from exc
+    artifacts = artifact_paths(output, version)
+    expected = {
+        "schema": 1,
+        "version": version,
+        "minimum_macos": MINIMUM_MACOS,
+        "inputs": input_hashes(repo_root),
+        "artifacts": {p.name: sha256_file(p) for p in artifacts},
+    }
+    if data != expected:
+        raise RuntimeError("Release provenance mismatch; rebuild release artifacts")
+    validate_python_artifacts(artifacts[0], artifacts[1])
+    validate_helper_archive(artifacts[2])
+    return artifacts
 
 
 def formula_content(
@@ -292,6 +513,8 @@ def formula_content(
 
   on_macos do
     on_arm do
+      depends_on macos: :tahoe
+
       resource "envrcctl-macos-auth-arm64" do
         url "{helper_url}"
         sha256 "{helper_sha256}"
@@ -332,6 +555,7 @@ def formula_content(
     assert_match "Manage .envrc", shell_output("#{{bin}}/envrcctl --help")
     if OS.mac? && Hardware::CPU.arm?
       assert_path_exists bin/"envrcctl-macos-auth"
+      assert_match "Usage:", shell_output("#{{bin}}/envrcctl-macos-auth --help")
     end
   end
 end
@@ -346,7 +570,7 @@ def write_formula(repo_root: Path, formula_text: str, formula_dir: Path | None) 
     return formula_path
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Build envrcctl release artifacts: sync dev dependencies, generate completions, "
@@ -354,6 +578,40 @@ def parse_args() -> argparse.Namespace:
             "and write a Homebrew formula. This is the canonical script entrypoint behind "
             "`make release-artifacts`."
         )
+    )
+    parser.add_argument(
+        "--uv",
+        default="uv",
+        help="uv executable used for locked dependency sync and builds.",
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--build",
+        action="store_true",
+        help="Explicitly select the default: rebuild all artifacts from current source.",
+    )
+    mode.add_argument(
+        "--formula-only",
+        action="store_true",
+        help="Only generate the formula; reject missing or mismatched artifact provenance.",
+    )
+    mode.add_argument(
+        "--python-only",
+        action="store_true",
+        help="Sync, regenerate completions and rebuild Python artifacts (no release provenance).",
+    )
+    mode.add_argument(
+        "--helper-only",
+        action="store_true",
+        help="Rebuild and package the helper only, without touching the tracked native binary.",
+    )
+    parser.add_argument(
+        "--signing-identity",
+        help="Developer ID Application identity used to sign the freshly built helper.",
+    )
+    parser.add_argument(
+        "--notary-profile",
+        help="Existing notarytool keychain profile; submit the signed helper and require Accepted.",
     )
     parser.add_argument(
         "--homepage",
@@ -372,30 +630,61 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Directory to write envrcctl.rb into. Defaults to ./Formula.",
     )
-    return parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.notary_profile and not args.signing_identity:
+        parser.error("--notary-profile requires --signing-identity")
+    if (args.formula_only or args.python_only) and (args.signing_identity or args.notary_profile):
+        parser.error("signing options require a helper build")
+    return args
 
 
-def main() -> int:
-    args = parse_args()
+def build_artifacts(repo_root: Path, version: str, args: argparse.Namespace) -> tuple[Path, ...]:
+    output = dist_dir(repo_root)
+    output.mkdir(parents=True, exist_ok=True)
+    if not args.helper_only:
+        sync_dev_environment(repo_root, args.uv)
+        generate_completions(repo_root, args.uv)
+    inputs = input_hashes(repo_root)
+    # Keep all staging on the destination filesystem. Existing release files survive failures.
+    with tempfile.TemporaryDirectory(prefix=".release-stage-", dir=output) as staging:
+        stage = Path(staging)
+        artifacts: tuple[Path, ...] = ()
+        if not args.helper_only:
+            artifacts = build_python_artifacts(repo_root, stage, args.uv)
+        if not args.python_only:
+            helper = build_helper_binary(repo_root, stage)
+            sign_helper(repo_root, helper, args.signing_identity, args.notary_profile)
+            artifacts += (package_helper_archive(repo_root, version, helper, stage),)
+        if input_hashes(repo_root) != inputs:
+            raise RuntimeError("Release inputs changed during the build; retry after edits finish")
+        provenance = None
+        if not (args.python_only or args.helper_only):
+            provenance = write_provenance(stage, version, inputs, artifacts)
+        for artifact in artifacts:
+            artifact.replace(output / artifact.name)
+        if provenance is not None:
+            provenance.replace(output / PROVENANCE_NAME)
+        else:
+            (output / PROVENANCE_NAME).unlink(missing_ok=True)
+        return tuple(output / artifact.name for artifact in artifacts)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
     repo_root = project_root()
     version = project_version(repo_root / "pyproject.toml")
 
-    print(f"Building release artifacts for envrcctl {version}")
+    print(f"Preparing release artifacts for envrcctl {version}")
     print(f"Repository root: {repo_root}")
 
-    sdist_path = dist_dir(repo_root) / f"envrcctl-{version}.tar.gz"
-    wheel_path = dist_dir(repo_root) / f"envrcctl-{version}-py3-none-any.whl"
-    helper_archive = dist_dir(repo_root) / f"envrcctl-macos-auth-{version}-arm64.tar.gz"
-
-    if not sdist_path.exists() or not wheel_path.exists() or not helper_archive.exists():
-        sync_dev_environment(repo_root)
-        generate_completions(repo_root)
-        clean_dist(repo_root)
-        sdist_path, wheel_path = build_python_artifacts(repo_root)
-        helper_binary = build_helper_binary(repo_root)
-        helper_archive = package_helper_archive(repo_root, version, helper_binary)
-    else:
-        print("Reusing existing release artifacts from dist/")
+    if not args.formula_only:
+        artifacts = build_artifacts(repo_root, version, args)
+        if args.python_only or args.helper_only:
+            print("Built artifacts (run a full build before formula generation):")
+            for artifact in artifacts:
+                print(f"- {artifact}")
+            return 0
+    sdist_path, wheel_path, helper_archive = verify_provenance(repo_root, version)
 
     source_sha256 = sha256_file(sdist_path)
     helper_sha256 = sha256_file(helper_archive)
@@ -430,4 +719,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except subprocess.CalledProcessError as exc:
+        print(f"Release stage failed: {exc}", file=sys.stderr)
+        raise SystemExit(exc.returncode if exc.returncode > 0 else 128 - exc.returncode) from exc
+    except (OSError, RuntimeError, ValueError, tarfile.TarError, zipfile.BadZipFile) as exc:
+        print(f"Release failed: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc

@@ -1,47 +1,26 @@
 from __future__ import annotations
 
 import json
-import os
-import shutil
 from pathlib import Path
-from typing import List
 
+from . import auth
 from .command_runner import run_command
 from .errors import EnvrcctlError
-from .secrets import SecretBackend, SecretRef
+from .secrets import SecretRef
 
 
-class KeychainBackend(SecretBackend):
+class KeychainBackend:
     """macOS Keychain backend using /usr/bin/security and a native auth helper."""
 
-    HELPER_ENV_VAR = "ENVRCCTL_MACOS_AUTH_HELPER"
-    DEFAULT_HELPER_BASENAME = "envrcctl-macos-auth"
+    HELPER_ENV_VAR = auth._HELPER_ENV_VAR
+    DEFAULT_HELPER_BASENAME = auth._DEFAULT_HELPER_BASENAME
 
     def _helper_path(self) -> Path:
-        configured = os.getenv(self.HELPER_ENV_VAR)
-        if configured:
-            return Path(configured).expanduser()
+        return auth._helper_path()
 
-        on_path = shutil.which(self.DEFAULT_HELPER_BASENAME)
-        if on_path:
-            return Path(on_path)
-
-        return Path(__file__).resolve().parent / self.DEFAULT_HELPER_BASENAME
-
-    def _ensure_helper_ready(self, helper_path: Path) -> None:
-        if not helper_path.exists():
-            raise EnvrcctlError(
-                "macOS authentication helper not found. "
-                "Build or install envrcctl-macos-auth to use authenticated secret access."
-            )
-        if not helper_path.is_file():
-            raise EnvrcctlError(
-                "macOS authentication helper path is invalid. Expected an executable file."
-            )
-        if not os.access(helper_path, os.X_OK):
-            raise EnvrcctlError(
-                "macOS authentication helper is not executable. Fix permissions and retry."
-            )
+    def _validate_ref(self, ref: SecretRef) -> None:
+        if ref.scheme != "kc":
+            raise EnvrcctlError("Keychain backend requires a kc secret reference.")
 
     def _build_auth_reason(self, action: str, ref: SecretRef) -> str:
         return (
@@ -49,27 +28,18 @@ class KeychainBackend(SecretBackend):
         )
 
     def _run_auth_helper(self, args: list[str], input_text: str | None = None) -> str:
-        helper_path = self._helper_path()
-        self._ensure_helper_ready(helper_path)
-        result = run_command(
+        helper_path = auth.ready_helper_path()
+        return run_command(
             [str(helper_path), *args],
             input_text=input_text,
             allowed_commands={str(helper_path)},
             error_message="Authenticated Keychain command failed.",
         )
-        return result.rstrip("\n")
 
     def get_with_auth(self, ref: SecretRef, reason: str | None = None) -> str:
-        return self._run_auth_helper(
-            [
-                "--service",
-                ref.service,
-                "--account",
-                ref.account,
-                "--reason",
-                reason or self._build_auth_reason("access", ref),
-            ]
-        )
+        self._validate_ref(ref)
+        values = self.get_many_with_auth([ref], reason or self._build_auth_reason("access", ref))
+        return values[(ref.service, ref.account)]
 
     def get_many_with_auth(
         self,
@@ -82,6 +52,7 @@ class KeychainBackend(SecretBackend):
         unique_refs: list[SecretRef] = []
         seen_refs: set[tuple[str, str]] = set()
         for ref in refs:
+            self._validate_ref(ref)
             key = (ref.service, ref.account)
             if key in seen_refs:
                 continue
@@ -106,10 +77,15 @@ class KeychainBackend(SecretBackend):
             input_text=payload,
         )
 
+        decoded = None
         try:
             decoded = json.loads(output)
-        except json.JSONDecodeError as exc:
-            raise EnvrcctlError("Authenticated Keychain helper returned invalid JSON.") from exc
+        except ValueError, RecursionError:
+            pass
+        if decoded is None:
+            raise EnvrcctlError("Authenticated Keychain helper returned invalid JSON.")
+        if not isinstance(decoded, dict):
+            raise EnvrcctlError("Authenticated Keychain helper returned an invalid response.")
 
         raw_items = decoded.get("items")
         if not isinstance(raw_items, list):
@@ -142,45 +118,31 @@ class KeychainBackend(SecretBackend):
             raise EnvrcctlError(
                 f"Authenticated Keychain helper response is missing secrets: {missing_list}"
             )
+        if set(values) != expected:
+            raise EnvrcctlError("Authenticated Keychain helper returned unexpected secret entries.")
 
         return values
 
     def get(self, ref: SecretRef) -> str:
-        result = run_command(
-            [
-                "security",
-                "find-generic-password",
-                "-s",
-                ref.service,
-                "-a",
-                ref.account,
-                "-w",
-            ],
-            allowed_commands={"security"},
-            error_message="Keychain command failed.",
-        )
-        return result.strip()
+        return self.get_with_auth(ref)
 
     def set(self, ref: SecretRef, value: str) -> None:
-        # Pass password directly to avoid interactive prompt.
-        run_command(
+        self._validate_ref(ref)
+        self._run_auth_helper(
             [
-                "security",
-                "add-generic-password",
-                "-s",
+                "--set",
+                "--service",
                 ref.service,
-                "-a",
+                "--account",
                 ref.account,
-                "-U",
-                "-w",
-                value,
+                "--reason",
+                self._build_auth_reason("store", ref),
             ],
             input_text=value,
-            allowed_commands={"security"},
-            error_message="Keychain command failed.",
         )
 
     def delete(self, ref: SecretRef) -> None:
+        self._validate_ref(ref)
         run_command(
             [
                 "security",
@@ -194,6 +156,6 @@ class KeychainBackend(SecretBackend):
             error_message="Keychain command failed.",
         )
 
-    def list(self, prefix: str | None = None) -> List[SecretRef]:
+    def list(self, prefix: str | None = None) -> list[SecretRef]:
         # Keychain listing is not required for current use-cases.
         return []

@@ -54,9 +54,7 @@ def test_clipboard_command_uses_xclip(monkeypatch) -> None:
 
 def test_clipboard_command_uses_xsel(monkeypatch) -> None:
     monkeypatch.setattr(cli.sys, "platform", "linux")
-    monkeypatch.setattr(
-        cli.shutil, "which", lambda cmd: "/usr/bin/xsel" if cmd == "xsel" else None
-    )
+    monkeypatch.setattr(cli.shutil, "which", lambda cmd: "/usr/bin/xsel" if cmd == "xsel" else None)
     assert cli._clipboard_command() == ["xsel", "--clipboard", "--input"]
 
 
@@ -75,9 +73,7 @@ def test_copy_to_clipboard_missing_tool(monkeypatch) -> None:
 def test_copy_to_clipboard_runs_command(monkeypatch) -> None:
     calls = {}
 
-    def fake_run_command(
-        args, input_text=None, allowed_commands=None, error_message=None
-    ):
+    def fake_run_command(args, input_text=None, allowed_commands=None, error_message=None):
         calls["args"] = args
         calls["input_text"] = input_text
         calls["allowed_commands"] = allowed_commands
@@ -111,9 +107,7 @@ def test_confirm_or_abort_assume_yes_skips(monkeypatch) -> None:
     assert called["ok"] is False
 
 
-def test_write_envrc_raises_when_world_writable_after_write(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_write_envrc_raises_when_world_writable_after_write(tmp_path: Path, monkeypatch) -> None:
     from envrcctl.envrc import load_envrc
     from envrcctl.managed_block import ManagedBlock
 

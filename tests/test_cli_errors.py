@@ -186,9 +186,7 @@ def test_secret_get_on_macos_requires_interactive_even_with_force_plain(
     )
 
 
-def test_inject_on_macos_requires_interactive_even_with_force(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_inject_on_macos_requires_interactive_even_with_force(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
@@ -234,16 +232,9 @@ def test_get_secret_values_without_bulk_support_falls_back_to_single_fetch(
         cli.parse_ref("kc:svc:acct2:runtime"),
     ]
 
-    values = cli._get_secret_values(refs, "Authenticate for envrcctl")
-
-    assert values == {
-        ("svc", "acct1"): "value-acct1",
-        ("svc", "acct2"): "value-acct2",
-    }
-    assert backend.calls == [
-        ("svc", "acct1", "Authenticate for envrcctl"),
-        ("svc", "acct2", "Authenticate for envrcctl"),
-    ]
+    with pytest.raises(EnvrcctlError, match="does not support authenticated access"):
+        cli._get_secret_values(refs, "Authenticate for envrcctl")
+    assert backend.calls == []
 
 
 def test_get_secret_values_uses_first_backend_on_non_macos(monkeypatch) -> None:
@@ -279,8 +270,8 @@ def test_get_secret_values_uses_first_backend_on_non_macos(monkeypatch) -> None:
     values = cli._get_secret_values(refs, None)
 
     assert values == {
-        ("svc", "acct1"): "value-acct1",
-        ("svc", "acct2"): "value-acct2",
+        ("kc", "svc", "acct1"): "value-acct1",
+        ("kc", "svc", "acct2"): "value-acct2",
     }
     assert backend.calls == [
         ("svc", "acct1", None),
@@ -413,9 +404,7 @@ def test_copy_to_clipboard_calls_run_command(monkeypatch) -> None:
 
     monkeypatch.setattr(cli, "_clipboard_command", lambda: ["pbcopy"])
 
-    def fake_run_command(
-        args, input_text=None, allowed_commands=None, error_message=""
-    ) -> None:
+    def fake_run_command(args, input_text=None, allowed_commands=None, error_message="") -> None:
         calls.append((args, input_text, allowed_commands, error_message))
 
     monkeypatch.setattr(cli, "run_command", fake_run_command)

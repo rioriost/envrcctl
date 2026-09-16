@@ -1,28 +1,10 @@
 _envrcctl_completion() {
-    local IFS=$'\n'
-    local response
-
-    response=$(env COMP_WORDS="${COMP_WORDS[*]}" COMP_CWORD=$COMP_CWORD _ENVRCCTL_COMPLETE=bash_complete $1)
-
-    for completion in $response; do
-        IFS=',' read type value <<< "$completion"
-
-        if [[ $type == 'dir' ]]; then
-            COMPREPLY=()
-            compopt -o dirnames
-        elif [[ $type == 'file' ]]; then
-            COMPREPLY=()
-            compopt -o default
-        elif [[ $type == 'plain' ]]; then
-            COMPREPLY+=($value)
-        fi
-    done
-
+    local IFS=$'
+'
+    COMPREPLY=( $( env COMP_WORDS="${COMP_WORDS[*]}" \
+                   COMP_CWORD=$COMP_CWORD \
+                   _ENVRCCTL_COMPLETE=complete_bash $1 ) )
     return 0
 }
 
-_envrcctl_completion_setup() {
-    complete -o nosort -F _envrcctl_completion envrcctl
-}
-
-_envrcctl_completion_setup;
+complete -o default -F _envrcctl_completion envrcctl

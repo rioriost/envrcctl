@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import errno
 import subprocess
-from typing import Iterable, Sequence
+from collections.abc import Iterable, Sequence
 
 from .errors import EnvrcctlError
 
@@ -22,26 +23,8 @@ def _validate_command_args(
             raise EnvrcctlError("Command arguments cannot contain null bytes.")
         validated.append(arg)
     if allowed_commands is not None and validated[0] not in allowed_commands:
-        raise EnvrcctlError(f"Command not allowed: {validated[0]}")
+        raise EnvrcctlError("Command not allowed.")
     return validated
-
-
-def _collect_redactions(input_text: str | None) -> list[str]:
-    redactions: list[str] = []
-    if input_text:
-        redactions.append(input_text)
-        stripped = input_text.strip()
-        if stripped and stripped not in redactions:
-            redactions.append(stripped)
-    return redactions
-
-
-def _redact_message(message: str, redactions: Sequence[str]) -> str:
-    redacted = message
-    for token in redactions:
-        if token:
-            redacted = redacted.replace(token, "[REDACTED]")
-    return redacted
 
 
 def run_command(
@@ -50,17 +33,30 @@ def run_command(
     error_message: str = "Command failed.",
     allowed_commands: Iterable[str] | None = None,
 ) -> str:
+    """Transport exact UTF-8 without retaining subprocess diagnostics or exception chains."""
     validated_args = _validate_command_args(args, allowed_commands)
+    failure = error_message
     try:
         result = subprocess.run(
             validated_args,
-            input=input_text,
-            text=True,
+            input=None if input_text is None else input_text.encode("utf-8"),
             capture_output=True,
             check=True,
         )
-    except subprocess.CalledProcessError as exc:
-        message = exc.stderr.strip() or exc.stdout.strip() or error_message
-        message = _redact_message(message, _collect_redactions(input_text))
-        raise EnvrcctlError(message) from exc
-    return result.stdout
+        return result.stdout.decode("utf-8")
+    except subprocess.CalledProcessError:
+        pass
+    except OSError as exc:
+        details = {
+            errno.ENOENT: "Executable not found.",
+            errno.EACCES: "Executable permission denied.",
+            errno.ENOEXEC: "Executable format is invalid.",
+        }
+        failure = f"{error_message} {details.get(exc.errno, 'Unable to start command.')}"
+    except UnicodeError:
+        failure = f"{error_message} Invalid UTF-8 data."
+    except KeyboardInterrupt:
+        failure = f"{error_message} Command interrupted."
+
+    # Raising outside the handlers also discards __context__, not just its display.
+    raise EnvrcctlError(failure)

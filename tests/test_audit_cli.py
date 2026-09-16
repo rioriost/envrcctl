@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -165,6 +164,7 @@ def test_audit_list_json_output(monkeypatch) -> None:
             "cwd": "/tmp/project",
             "error": None,
             "event_id": "evt-1",
+            "operation_id": None,
             "hash": "hash-1",
             "platform": "linux",
             "prev_hash": None,
@@ -240,6 +240,7 @@ def test_audit_show_by_index_json(monkeypatch) -> None:
         "cwd": "/tmp/project",
         "error": {"code": "secret_get_failed", "message": "boom"},
         "event_id": "evt-2",
+        "operation_id": None,
         "hash": "hash-2",
         "platform": "linux",
         "prev_hash": "hash-1",

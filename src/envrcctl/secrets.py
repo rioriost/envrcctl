@@ -4,8 +4,9 @@ import os
 import re
 import shutil
 import sys
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Iterable, Mapping, Protocol
+from typing import Protocol, runtime_checkable
 
 from .errors import EnvrcctlError
 
@@ -25,9 +26,7 @@ def _normalize_kind(kind: str) -> str:
     normalized = kind.strip().lower()
     if normalized not in SUPPORTED_KINDS:
         supported = ", ".join(SUPPORTED_KINDS)
-        raise EnvrcctlError(
-            f"Invalid secret kind: {kind}. Supported kinds: {supported}."
-        )
+        raise EnvrcctlError(f"Invalid secret kind: {kind}. Supported kinds: {supported}.")
     return normalized
 
 
@@ -42,6 +41,15 @@ class SecretRef:
 class SecretBackend(Protocol):
     def get(self, ref: SecretRef) -> str: ...
 
+    def set(self, ref: SecretRef, value: str) -> None: ...
+
+    def delete(self, ref: SecretRef) -> None: ...
+
+    def list(self, prefix: str | None = None) -> Iterable[SecretRef]: ...
+
+
+@runtime_checkable
+class AuthenticatedSecretBackend(SecretBackend, Protocol):
     def get_with_auth(self, ref: SecretRef, reason: str | None = None) -> str: ...
 
     def get_many_with_auth(
@@ -49,12 +57,6 @@ class SecretBackend(Protocol):
         refs: list[SecretRef],
         reason: str | None = None,
     ) -> Mapping[tuple[str, str], str]: ...
-
-    def set(self, ref: SecretRef, value: str) -> None: ...
-
-    def delete(self, ref: SecretRef) -> None: ...
-
-    def list(self, prefix: str | None = None) -> Iterable[SecretRef]: ...
 
 
 def parse_ref(ref: str) -> SecretRef:
@@ -99,8 +101,7 @@ def resolve_backend(scheme: str | None = None) -> tuple[str, SecretBackend]:
         if requested not in SUPPORTED_SCHEMES:
             supported = ", ".join(SUPPORTED_SCHEMES)
             raise EnvrcctlError(
-                f"Unsupported secret backend scheme: {requested}. "
-                f"Supported schemes: {supported}."
+                f"Unsupported secret backend scheme: {requested}. Supported schemes: {supported}."
             )
         return requested, _backend_for_scheme(requested)
 
@@ -123,6 +124,11 @@ def _backend_for_scheme(scheme: str) -> SecretBackend:
 
         return KeychainBackend()
     if scheme == "ss":
+        if sys.platform == "darwin":
+            raise EnvrcctlError(
+                "SecretService is unsupported on macOS: it cannot enforce the mandatory "
+                "device owner authentication policy. Use the kc backend instead."
+            )
         if not _have_cmd("secret-tool"):
             raise EnvrcctlError("SecretService backend requires secret-tool.")
         from .secretservice import SecretServiceBackend

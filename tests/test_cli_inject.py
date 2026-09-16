@@ -19,9 +19,7 @@ def test_cli_inject_records_success_audit_event(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setattr(cli, "resolve_backend", lambda: ("kc", dummy))
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
-    monkeypatch.setattr(
-        cli, "append_event", lambda **kwargs: audit_calls.append(kwargs)
-    )
+    monkeypatch.setattr(cli, "append_event", lambda **kwargs: audit_calls.append(kwargs))
     monkeypatch.setattr(cli.sys, "platform", "linux")
 
     runner.invoke(cli.app, ["init"])
@@ -52,6 +50,7 @@ def test_cli_inject_records_success_audit_event(tmp_path: Path, monkeypatch) -> 
             "platform": "linux",
             "command": None,
             "error": None,
+            "operation_id": None,
         }
     ]
 
@@ -69,9 +68,7 @@ def test_cli_inject_records_failure_audit_event(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setattr(cli, "backend_for_ref", lambda ref: dummy)
     monkeypatch.setattr(dummy, "get", fake_get)
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
-    monkeypatch.setattr(
-        cli, "append_event", lambda **kwargs: audit_calls.append(kwargs)
-    )
+    monkeypatch.setattr(cli, "append_event", lambda **kwargs: audit_calls.append(kwargs))
     monkeypatch.setattr(cli.sys, "platform", "linux")
 
     runner.invoke(cli.app, ["init"])
@@ -101,7 +98,10 @@ def test_cli_inject_records_failure_audit_event(tmp_path: Path, monkeypatch) -> 
             "cwd": tmp_path,
             "platform": "linux",
             "command": None,
-            "error": AuditErrorInfo(code="inject_failed", message="boom"),
+            "error": AuditErrorInfo(
+                code="inject_failed", message="EnvrcctlError: operation failed."
+            ),
+            "operation_id": None,
         }
     ]
 
@@ -132,9 +132,7 @@ def test_cli_inject_on_macos_requires_auth(tmp_path: Path, monkeypatch) -> None:
     result = runner.invoke(cli.app, ["inject"])
     assert result.exit_code == 0
     assert "export TOKEN=secretvalue" in result.stdout
-    assert auth_calls == [
-        ([("st.rio.envrcctl", "acct")], "Inject secrets with envrcctl")
-    ]
+    assert auth_calls == [([("st.rio.envrcctl", "acct")], "Inject secrets with envrcctl")]
 
 
 def test_cli_inject_on_macos_force_does_not_bypass_auth_failure(
